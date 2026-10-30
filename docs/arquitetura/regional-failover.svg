@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1260" viewBox="0 0 1200 1260" role="img" aria-labelledby="title description">
+  <title id="title">Regional outage: Front Door routes API traffic to the surviving region</title>
+  <desc id="description">Conceptual flow after health-probe convergence. Region 1 is unavailable. Failed probes cause Front Door Premium to exclude that origin while Region 2 remains healthy. Clients retain the same public hostname. Requests use Private Link to Region 2 APIM Standard v2, then private HTTP to its local AKS backend in this PoC. No APIM-to-APIM forwarding or data replication is implied. Recovery requires operators and healthy probes. Backend scale-to-zero tests do not simulate a full regional outage or establish RTO or RPO.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#10243a"/>
+      <stop offset="1" stop-color="#163e60"/>
+    </linearGradient>
+    <marker id="active-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#075bba"/>
+    </marker>
+    <marker id="probe-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0 L8 4 L0 8 Z" fill="#9a4c08"/>
+    </marker>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; fill: #18334c; }
+      .title { font-size: 30px; font-weight: 700; }
+      .section { font-size: 22px; font-weight: 700; }
+      .label { font-size: 19px; font-weight: 600; }
+      .body { font-size: 17px; }
+      .small { font-size: 15px; fill: #466077; }
+      .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; }
+      .white { fill: #ffffff; }
+      .pale { fill: #c4deee; }
+      .muted { fill: #596675; }
+      .warning { fill: #884209; }
+      .active { fill: none; stroke: #075bba; stroke-width: 4; marker-end: url(#active-arrow); }
+      .probe { fill: none; stroke: #9a4c08; stroke-width: 2.5; stroke-dasharray: 8 6; marker-end: url(#probe-arrow); }
+      .unavailable { fill: none; stroke: #778391; stroke-width: 2; stroke-dasharray: 3 6; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="1260" fill="#f8fafc"/>
+  <rect width="1200" height="116" fill="url(#header)"/>
+  <text x="50" y="32" class="eyebrow pale">REGIONAL OUTAGE / CONCEPTUAL ROUTING BEHAVIOR</text>
+  <text x="50" y="71" class="title white">One region offline. The healthy region serves.</text>
+  <text x="50" y="99" class="body pale">State shown: after probe convergence, with one healthy origin and sufficient capacity.</text>
+
+  <rect x="380" y="140" width="440" height="66" rx="12" fill="#ffffff" stroke="#bfd3eb"/>
+  <text x="600" y="168" text-anchor="middle" class="label">Clients / Internet</text>
+  <text x="600" y="192" text-anchor="middle" class="small">Same Front Door hostname; no client DNS switch</text>
+  <path d="M600 206 V258" class="active"/>
+  <text x="620" y="237" class="small">Send HTTPS API requests</text>
+
+  <rect x="280" y="260" width="640" height="92" rx="16" fill="#075bba"/>
+  <text x="600" y="294" text-anchor="middle" class="section white">Azure Front Door Premium + WAF</text>
+  <text x="600" y="321" text-anchor="middle" class="body white">Evaluate origin health and route requests</text>
+  <text x="600" y="342" text-anchor="middle" class="small white">Public gateway hostname stays unchanged</text>
+
+  <rect x="50" y="475" width="520" height="375" rx="20" fill="#f3f4f6" stroke="#778391" stroke-width="2" stroke-dasharray="8 6"/>
+  <rect x="630" y="475" width="520" height="375" rx="20" fill="#f0f6ff" stroke="#8faed0" stroke-width="2"/>
+  <path d="M450 352 V392 H310 V533" class="probe"/>
+  <path d="M750 352 V392 H890 V533" class="active"/>
+  <rect x="65" y="410" width="400" height="43" rx="10" fill="#fff3df" stroke="#c59050"/>
+  <text x="265" y="437" text-anchor="middle" class="body warning">Probe fails; origin excluded after detection</text>
+  <rect x="735" y="410" width="400" height="43" rx="10" fill="#eaf1fa" stroke="#8faed0"/>
+  <text x="935" y="437" text-anchor="middle" class="body">Route via Private Link / HTTPS</text>
+
+  <rect x="73" y="489" width="193" height="29" rx="6" fill="#fff3df"/>
+  <text x="85" y="509" class="eyebrow warning">REGION 1 / OFFLINE</text>
+  <rect x="653" y="489" width="193" height="29" rx="6" fill="#dcecff"/>
+  <text x="665" y="509" class="eyebrow">REGION 2 / HEALTHY</text>
+
+  <rect x="85" y="533" width="450" height="88" rx="12" fill="#ffffff" stroke="#a1aab5"/>
+  <text x="310" y="566" text-anchor="middle" class="section muted">APIM Standard v2</text>
+  <text x="310" y="592" text-anchor="middle" class="body muted">Unavailable origin; not serving API traffic</text>
+  <rect x="665" y="533" width="450" height="88" rx="12" fill="#ffffff" stroke="#8faed0"/>
+  <text x="890" y="566" text-anchor="middle" class="section">APIM Standard v2</text>
+  <text x="890" y="592" text-anchor="middle" class="body">Private gateway; public access disabled</text>
+
+  <path d="M310 621 V704" class="unavailable"/>
+  <text x="330" y="657" class="small muted">Unavailable</text>
+  <text x="330" y="678" class="small muted">regional path</text>
+  <path d="M890 621 V704" class="active"/>
+  <text x="665" y="651" class="small">Call local backend via outbound VNet</text>
+  <text x="665" y="675" class="small">Private HTTP in PoC; TLS required for production</text>
+
+  <rect x="85" y="707" width="450" height="111" rx="12" fill="#ffffff" stroke="#a1aab5"/>
+  <text x="310" y="744" text-anchor="middle" class="section muted">Private AKS / demo</text>
+  <text x="310" y="772" text-anchor="middle" class="body muted">Region unavailable in this scenario</text>
+  <text x="310" y="797" text-anchor="middle" class="small muted">Operators must restore and verify recovery</text>
+  <rect x="665" y="707" width="450" height="111" rx="12" fill="#ffffff" stroke="#8faed0"/>
+  <text x="890" y="744" text-anchor="middle" class="section">Private AKS / demo</text>
+  <text x="890" y="772" text-anchor="middle" class="body">Internal Service serves regional pods</text>
+  <text x="890" y="797" text-anchor="middle" class="small">Must support the full surviving workload</text>
+
+  <path d="M60 880 H103" stroke="#075bba" stroke-width="4"/>
+  <text x="115" y="885" class="small">Solid: requests</text>
+  <path d="M300 880 H343" stroke="#9a4c08" stroke-width="2.5" stroke-dasharray="8 6"/>
+  <text x="355" y="885" class="small">Dashed: failed probes</text>
+  <path d="M605 880 H648" stroke="#778391" stroke-width="2" stroke-dasharray="3 6"/>
+  <text x="660" y="885" class="small">Dotted: unavailable path</text>
+  <text x="60" y="911" class="small">Arrows point from caller to destination. Responses follow the same request path back.</text>
+
+  <rect x="50" y="936" width="350" height="124" rx="12" fill="#ffffff" stroke="#bfd3eb"/>
+  <text x="70" y="966" class="label">1. Detect</text>
+  <text x="70" y="994" class="body">Readiness probes fail end-to-end.</text>
+  <text x="70" y="1019" class="small">Detection takes time; requests may fail</text>
+  <text x="70" y="1041" class="small">before Front Door excludes the origin.</text>
+  <rect x="425" y="936" width="350" height="124" rx="12" fill="#ffffff" stroke="#bfd3eb"/>
+  <text x="445" y="966" class="label">2. Serve from the survivor</text>
+  <text x="445" y="994" class="body">Healthy Region 2 handles traffic.</text>
+  <text x="445" y="1019" class="small">No APIM-to-APIM forwarding.</text>
+  <text x="445" y="1041" class="small">Matching configuration/capacity required.</text>
+  <rect x="800" y="936" width="350" height="124" rx="12" fill="#ffffff" stroke="#bfd3eb"/>
+  <text x="820" y="966" class="label">3. Recover and rejoin</text>
+  <text x="820" y="994" class="body">Operators restore Region 1.</text>
+  <text x="820" y="1019" class="small">Healthy probes permit routing again;</text>
+  <text x="820" y="1041" class="small">traffic split depends on origin settings.</text>
+
+  <rect x="50" y="1085" width="1100" height="142" rx="12" fill="#fff3df" stroke="#c59050"/>
+  <text x="70" y="1116" class="label warning">Routing failover is not a complete DR guarantee</text>
+  <text x="70" y="1143" class="body">Scale-to-zero scripts test one backend, not an actual regional APIM/AKS outage.</text>
+  <text x="70" y="1168" class="body">No persistent data or replication in this demo: no demonstrated RPO or regional DR RTO.</text>
+  <text x="70" y="1194" class="small">Assumes Front Door and the surviving regional path remain available. No continuity guarantee if both origins fail.</text>
+  <text x="70" y="1215" class="small">Region 1 and Region 2 are configurable locations. No live endpoints or customer-specific identifiers are shown.</text>
+</svg>

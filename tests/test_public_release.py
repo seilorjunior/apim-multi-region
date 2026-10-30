@@ -39,6 +39,7 @@ class PublicReleaseTests(unittest.TestCase):
             "operator.pem", "operator.key", "operator.pfx", "operator.p12",
             "kubeconfig", "kubeconfig.backup", "operator.kubeconfig", ".kube/config",
             "terraform.tfstate", "terraform.tfstate.backup", "deployment.tfplan",
+            ".playwright-mcp/browser-console.log",
         ]
         public = ["README.md", "LICENSE", ".github/SECURITY.md",
                   "infra/main.bicep", "infra/main.parameters.json", "k8s/demo.yaml",

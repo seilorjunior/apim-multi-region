@@ -5,6 +5,7 @@ import re
 import shlex
 import subprocess
 import unittest
+import xml.etree.ElementTree as ET
 
 import yaml
 
@@ -194,6 +195,28 @@ class RepositoryTests(unittest.TestCase):
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / target.split("#", 1)[0]).exists(),
                                     f"Broken documentation link: {target}")
+
+    def test_readme_architecture_and_failover_svgs(self):
+        readme = (ROOT / "README.md").read_text()
+        namespace = {"svg": "http://www.w3.org/2000/svg"}
+        for name in ("arquitetura-alternativa-2-privada.svg", "regional-failover.svg"):
+            relative = f"./docs/arquitetura/{name}"
+            with self.subTest(diagram=name):
+                self.assertRegex(readme, r"!\[[^\]]+\]\(" + re.escape(relative) + r"\)")
+                root = ET.parse(ROOT / "docs" / "arquitetura" / name).getroot()
+                self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+                self.assertEqual(root.get("role"), "img")
+                self.assertTrue(root.get("viewBox"))
+                for tag in ("title", "desc"):
+                    self.assertTrue(root.find(f"svg:{tag}", namespace).text.strip())
+                identifiers = {node.get("id") for node in root.iter() if node.get("id")}
+                for identifier in root.get("aria-labelledby", "").split():
+                    self.assertIn(identifier, identifiers)
+        failover = ET.parse(ROOT / "docs" / "arquitetura" / "regional-failover.svg").getroot()
+        labels = " ".join(failover.itertext())
+        for concept in ("OFFLINE", "HEALTHY", "Private Link", "No APIM-to-APIM forwarding",
+                        "No persistent data", "Scale-to-zero scripts", "Recovery requires operators"):
+            self.assertIn(concept, labels)
 
 
 if __name__ == "__main__":

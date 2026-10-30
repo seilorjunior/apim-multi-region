@@ -25,6 +25,16 @@ Internet -> Front Door Premium + WAF
 There is no APIM Developer gateway, VM proxy, or intermediary load balancer before
 APIM. The Kubernetes Service uses an internal load balancer **after** APIM.
 
+### Architecture diagram
+
+![Reference architecture: Front Door Premium and WAF connect over Private Link to two independent APIM Standard v2 gateways, each serving its local private AKS cluster.](./docs/arquitetura/arquitetura-alternativa-2-privada.svg)
+
+[Open the architecture SVG](./docs/arquitetura/arquitetura-alternativa-2-privada.svg).
+This conceptual reference uses Brazil South/East US and shows the production
+target, including private backend HTTPS and data dependencies. The implemented
+PoC instead uses private backend HTTP, synthetic unauthenticated responses, and
+no database or replication. Actual regions are configurable, as described below.
+
 ## Regions and sample scope
 
 The original [architecture alternative 2](./docs/arquitetura/arquitetura-alternativa-2-apim-standard-v2-privado.md)
@@ -266,6 +276,35 @@ Never execute/evaluate its output as shell code. A typical response is:
 Equal weights do not guarantee a 50/50 split or that one client sees both regions.
 
 ## 6. Exercise backend failover safely
+
+### When one region is unavailable
+
+![Conceptual regional outage: Front Door detects an unhealthy Region 1 origin and, after health-probe convergence, routes API requests through Private Link to Region 2 APIM and private AKS.](./docs/arquitetura/regional-failover.svg)
+
+[Open the regional failover SVG](./docs/arquitetura/regional-failover.svg).
+The diagram shows Region 1 unavailable; the same routing principle applies if
+Region 2 fails instead. Clients continue using the same Front Door hostname:
+there is no client DNS change and no APIM-to-APIM forwarding.
+
+1. **Detect:** end-to-end readiness probes fail for the affected origin.
+2. **Converge:** after the configured health evaluation, Front Door excludes
+   that origin while the other origin remains healthy. Requests can fail during
+   detection/convergence; failover is not instantaneous.
+3. **Serve:** the surviving regional APIM and AKS handle the traffic. They must
+   already have working private connectivity, matching APIs/images, healthy
+   dependencies, and sufficient capacity; traffic failover does not create capacity.
+4. **Recover:** operators restore and verify the failed region. Front Door can
+   use its origin again once probes mark it healthy; traffic distribution still
+   depends on origin settings and latency, not a guaranteed 50/50 split.
+
+This is a **conceptual regional-outage flow, not evidence of tested regional DR**.
+The scripts below simulate only backend unavailability by scaling one demo
+deployment to zero; they do not stop an Azure region, its APIM, or its cluster.
+The demo has no persistent data, so neither the diagram nor the exercise proves
+replication, RPO, or a DR RTO. If both origins are unhealthy, Front Door behavior
+does not guarantee continuity or an absolute traffic block.
+
+### Run the controlled backend exercise
 
 **This interrupts one application. It is not a full regional disaster-recovery test.**
 Use an approved maintenance window, confirm survivor capacity, and keep an

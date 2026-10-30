@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1320" viewBox="0 0 1200 1320" style="width:100%;max-width:1200px;height:auto;display:block;margin:0 auto" role="img" aria-labelledby="title description">
-  <title id="title">Alternativa 2: APIM Standard v2 e AKS privados no Brasil e nos EUA</title>
-  <desc id="description">Front Door Premium com WAF e unica entrada publica de APIs. Duas conexoes Private Link diretas chegam a instancias APIM Standard v2 independentes. Cada APIM usa integracao de VNet de saida para acessar o AKS privado local. Sem proxies ou balanceadores intermediarios antes do APIM. Dados e configuracoes exigem estrategias proprias de replicacao e entrega.</desc>
+  <title id="title">Alternative 2: APIM Standard v2 and private AKS in Brazil and the US</title>
+  <desc id="description">Front Door Premium with WAF is the only public API entry point. Two direct Private Link connections reach independent APIM Standard v2 instances. Each APIM uses outbound VNet integration to reach its local private AKS backend. No VM proxies or intermediate load balancers precede APIM. Data and configuration require their own replication and delivery strategies.</desc>
   <defs>
     <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#10243a"/>
@@ -33,12 +33,12 @@
   </defs>
   <rect width="1200" height="1320" fill="#f8fafc"/>
   <rect width="1200" height="112" fill="url(#header)"/>
-  <text x="50" y="31" class="eyebrow pale">ALTERNATIVA 02 / ARQUITETURA MULTI-REGIAO</text>
-  <text x="50" y="69" class="title white">Duas regioes. Uma entrada. Caminho privado.</text>
-  <text x="50" y="95" class="body pale">APIM Standard v2 independente + AKS privado | Brasil e Estados Unidos</text>
+  <text x="50" y="31" class="eyebrow pale">ALTERNATIVE 02 / MULTI-REGION ARCHITECTURE</text>
+  <text x="50" y="69" class="title white">Two regions. One entry point. A private path.</text>
+  <text x="50" y="95" class="body pale">Independent APIM Standard v2 + private AKS | Brazil and United States</text>
 
   <rect x="440" y="132" width="320" height="54" rx="12" fill="#ffffff" stroke="#cbd5e1" class="outline"/>
-  <text x="600" y="155" text-anchor="middle" class="label">Clientes / Internet</text>
+  <text x="600" y="155" text-anchor="middle" class="label">Clients / Internet</text>
   <text x="600" y="176" text-anchor="middle" class="small">api.example.com</text>
   <path d="M600 186 V222" class="flow"/>
   <text x="616" y="210" class="small">HTTPS</text>
@@ -46,89 +46,89 @@
   <rect x="280" y="224" width="640" height="85" rx="16" fill="url(#frontdoor)"/>
   <path d="M312 244 L326 238 L340 244 V257 Q340 270 326 277 Q312 270 312 257 Z" fill="none" stroke="#ffffff" stroke-width="2"/>
   <text x="363" y="256" class="section white">Azure Front Door Premium + WAF</text>
-  <text x="600" y="285" text-anchor="middle" class="body white">Entrada publica de APIs | ativo-ativo | health probes</text>
+  <text x="600" y="285" text-anchor="middle" class="body white">Public API entry point | active-active | health probes</text>
 
   <path d="M48 337 H1152" stroke="#b3c5d5" stroke-dasharray="5 6" fill="none"/>
   <rect x="383" y="323" width="434" height="27" rx="12" fill="#f8fafc"/>
-  <text x="600" y="342" text-anchor="middle" class="eyebrow">FRONTEIRA PUBLICA / PRIVADA DAS APIs</text>
+  <text x="600" y="342" text-anchor="middle" class="eyebrow">PUBLIC / PRIVATE API BOUNDARY</text>
 
   <path d="M420 309 V361 H305 V468" class="flow"/>
   <path d="M780 309 V361 H895 V468" class="flow"/>
   <rect x="205" y="368" width="200" height="30" rx="15" fill="#e1f3f0" stroke="#b3dfd5"/>
   <rect x="795" y="368" width="200" height="30" rx="15" fill="#e1f3f0" stroke="#b3dfd5"/>
-  <text x="305" y="388" text-anchor="middle" class="small">Private Link direto</text>
-  <text x="895" y="388" text-anchor="middle" class="small">Private Link direto</text>
+  <text x="305" y="388" text-anchor="middle" class="small">Direct Private Link</text>
+  <text x="895" y="388" text-anchor="middle" class="small">Direct Private Link</text>
 
   <rect x="60" y="414" width="490" height="606" rx="20" fill="#f1faf6" stroke="#badacb" class="outline"/>
   <rect x="650" y="414" width="490" height="606" rx="20" fill="#f0f6ff" stroke="#bfd3eb" class="outline"/>
   <circle cx="87" cy="441" r="5" fill="#16816e"/>
   <circle cx="677" cy="441" r="5" fill="#2874b8"/>
-  <text x="103" y="447" class="section">BRASIL</text>
+  <text x="103" y="447" class="section">BRAZIL</text>
   <text x="522" y="446" text-anchor="end" class="body">Brazil South</text>
-  <text x="693" y="447" class="section">ESTADOS UNIDOS</text>
+  <text x="693" y="447" class="section">UNITED STATES</text>
   <text x="1112" y="446" text-anchor="end" class="body">East US</text>
 
   <rect x="85" y="470" width="440" height="112" rx="12" fill="#ffffff" stroke="#ae98cc" class="outline"/>
   <rect x="675" y="470" width="440" height="112" rx="12" fill="#ffffff" stroke="#ae98cc" class="outline"/>
   <rect x="85" y="485" width="4" height="80" rx="2" fill="#8860b0"/>
   <rect x="675" y="485" width="4" height="80" rx="2" fill="#8860b0"/>
-  <text x="108" y="501" class="label">APIM Standard v2 Brasil</text>
-  <text x="698" y="501" class="label">APIM Standard v2 EUA</text>
-  <text x="108" y="527" class="body">Instancia independente | politicas e auth</text>
-  <text x="698" y="527" class="body">Instancia independente | politicas e auth</text>
+  <text x="108" y="501" class="label">APIM Standard v2 Brazil</text>
+  <text x="698" y="501" class="label">APIM Standard v2 US</text>
+  <text x="108" y="527" class="body">Independent instance | policies and auth</text>
+  <text x="698" y="527" class="body">Independent instance | policies and auth</text>
   <rect x="108" y="542" width="300" height="25" rx="6" fill="#f0eafa"/>
   <rect x="698" y="542" width="300" height="25" rx="6" fill="#f0eafa"/>
-  <text x="120" y="559" class="small">Gateway: acesso publico desabilitado</text>
-  <text x="710" y="559" class="small">Gateway: acesso publico desabilitado</text>
+  <text x="120" y="559" class="small">Gateway: public access disabled</text>
+  <text x="710" y="559" class="small">Gateway: public access disabled</text>
 
   <rect x="78" y="612" width="454" height="271" rx="12" fill="#ffffff" fill-opacity="0.5" stroke="#8ab6a0" stroke-dasharray="5 4"/>
   <rect x="668" y="612" width="454" height="271" rx="12" fill="#ffffff" fill-opacity="0.5" stroke="#8faed0" stroke-dasharray="5 4"/>
-  <text x="98" y="636" class="eyebrow">VNET BRASIL / SAIDA</text>
-  <text x="688" y="636" class="eyebrow">VNET EUA / SAIDA</text>
+  <text x="98" y="636" class="eyebrow">BRAZIL VNET / OUTBOUND</text>
+  <text x="688" y="636" class="eyebrow">US VNET / OUTBOUND</text>
   <path d="M305 582 V651" class="flow"/>
   <path d="M895 582 V651" class="flow"/>
 
   <rect x="105" y="653" width="400" height="61" rx="9" fill="#e9f4f1" stroke="#a9cdbf" class="outline"/>
   <rect x="695" y="653" width="400" height="61" rx="9" fill="#eaf1fa" stroke="#b4cae5" class="outline"/>
-  <text x="305" y="679" text-anchor="middle" class="label">Integracao de VNet de saida</text>
-  <text x="895" y="679" text-anchor="middle" class="label">Integracao de VNet de saida</text>
-  <text x="305" y="701" text-anchor="middle" class="small">Subnet de integracao | DNS e regras de rede</text>
-  <text x="895" y="701" text-anchor="middle" class="small">Subnet de integracao | DNS e regras de rede</text>
+  <text x="305" y="679" text-anchor="middle" class="label">Outbound VNet integration</text>
+  <text x="895" y="679" text-anchor="middle" class="label">Outbound VNet integration</text>
+  <text x="305" y="701" text-anchor="middle" class="small">Integration subnet | DNS and network rules</text>
+  <text x="895" y="701" text-anchor="middle" class="small">Integration subnet | DNS and network rules</text>
   <path d="M305 714 V758" class="flow"/>
   <path d="M895 714 V758" class="flow"/>
-  <text x="320" y="742" class="small">HTTPS privado</text>
-  <text x="910" y="742" class="small">HTTPS privado</text>
+  <text x="320" y="742" class="small">Private HTTPS</text>
+  <text x="910" y="742" class="small">Private HTTPS</text>
 
   <rect x="105" y="760" width="400" height="102" rx="12" fill="#ffffff" stroke="#6fa9d1" class="outline"/>
   <rect x="695" y="760" width="400" height="102" rx="12" fill="#ffffff" stroke="#6fa9d1" class="outline"/>
-  <text x="305" y="789" text-anchor="middle" class="section">AKS privado Brasil</text>
-  <text x="895" y="789" text-anchor="middle" class="section">AKS privado EUA</text>
-  <text x="305" y="815" text-anchor="middle" class="body">Gateway/Ingress interno → APIs e servicos</text>
-  <text x="895" y="815" text-anchor="middle" class="body">Gateway/Ingress interno → APIs e servicos</text>
-  <text x="305" y="840" text-anchor="middle" class="small">API server privado | backend local</text>
-  <text x="895" y="840" text-anchor="middle" class="small">API server privado | capacidade de failover</text>
+  <text x="305" y="789" text-anchor="middle" class="section">Private AKS Brazil</text>
+  <text x="895" y="789" text-anchor="middle" class="section">Private AKS US</text>
+  <text x="305" y="815" text-anchor="middle" class="body">Internal gateway/ingress → APIs and services</text>
+  <text x="895" y="815" text-anchor="middle" class="body">Internal gateway/ingress → APIs and services</text>
+  <text x="305" y="840" text-anchor="middle" class="small">Private API server | local backend</text>
+  <text x="895" y="840" text-anchor="middle" class="small">Private API server | failover capacity</text>
   <path d="M305 862 V914" class="flow"/>
   <path d="M895 862 V914" class="flow"/>
 
   <rect x="85" y="916" width="440" height="76" rx="12" fill="#e0f2e9" stroke="#9ac8b1" class="outline"/>
   <rect x="675" y="916" width="440" height="76" rx="12" fill="#e0f2e9" stroke="#9ac8b1" class="outline"/>
-  <text x="305" y="946" text-anchor="middle" class="label">Dados e dependencias Brasil*</text>
-  <text x="895" y="946" text-anchor="middle" class="label">Dados e dependencias EUA*</text>
-  <text x="305" y="973" text-anchor="middle" class="small">Banco, filas e segredos | acesso privado</text>
-  <text x="895" y="973" text-anchor="middle" class="small">Replicacao e promocao conforme servico</text>
+  <text x="305" y="946" text-anchor="middle" class="label">Data and dependencies: Brazil*</text>
+  <text x="895" y="946" text-anchor="middle" class="label">Data and dependencies: US*</text>
+  <text x="305" y="973" text-anchor="middle" class="small">Database, queues and secrets | private access</text>
+  <text x="895" y="973" text-anchor="middle" class="small">Service-specific replication and promotion</text>
   <path d="M525 958 H673" class="replica"/>
-  <text x="600" y="936" text-anchor="middle" class="small">Replicacao*</text>
+  <text x="600" y="936" text-anchor="middle" class="small">Replication*</text>
 
   <rect x="60" y="1040" width="1080" height="75" rx="14" fill="#ffffff" stroke="#ccd8e4" class="outline"/>
   <rect x="60" y="1054" width="4" height="46" rx="2" fill="#8860b0"/>
-  <text x="85" y="1069" class="label">Uma fonte de configuracao. Dois destinos de entrega.</text>
-  <text x="85" y="1095" class="body">Pipeline → APIM Brasil e EUA + aplicacoes AKS | APIs, politicas e credenciais coordenadas</text>
+  <text x="85" y="1069" class="label">One configuration source. Two delivery targets.</text>
+  <text x="85" y="1095" class="body">Pipeline → Brazil and US APIM + AKS apps | Coordinated APIs, policies and credentials</text>
 
-  <text x="60" y="1150" class="label">Sem proxies em VMs. Sem balanceador intermediario antes do APIM.</text>
-  <text x="60" y="1177" class="body">O ingresso interno do AKS permanece. Private Endpoints de entrada sao gerenciados pelo Front Door.</text>
-  <text x="60" y="1203" class="body">Probe: Front Door → Private Link → APIM → aplicacao AKS. Falha regional desvia novas chamadas.</text>
-  <text x="60" y="1229" class="small">* Dados exigem estrategia propria: definir RPO/RTO, promocao e LGPD. Nao ha sincronizacao nativa entre os APIM.</text>
+  <text x="60" y="1150" class="label">No VM proxies. No intermediate load balancer before APIM.</text>
+  <text x="60" y="1177" class="body">Internal AKS ingress remains. Inbound Private Endpoints are managed by Front Door.</text>
+  <text x="60" y="1203" class="body">Probe: Front Door → Private Link → APIM → AKS app. Regional failure reroutes requests after detection.</text>
+  <text x="60" y="1229" class="small">* Plan data RPO/RTO, promotion and LGPD (Brazilian data protection law). No native synchronization between APIM instances.</text>
   <path d="M60 1250 H1140" stroke="#d7e1eb" fill="none"/>
-  <text x="60" y="1274" class="small">Proposta conceitual | Validar disponibilidade regional e capacidade antes da implantacao.</text>
-  <text x="60" y="1297" class="small">Entrada privada de APIs nao privatiza automaticamente portal, gestao ou dependencias de plataforma.</text>
+  <text x="60" y="1274" class="small">Conceptual proposal | Validate regional availability and capacity before deployment.</text>
+  <text x="60" y="1297" class="small">Private API ingress does not automatically privatize the portal, management or platform dependencies.</text>
 </svg>

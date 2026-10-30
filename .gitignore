@@ -22,3 +22,4 @@ __pycache__/
 *.pyc
 .venv/
 TestResults/
+.playwright-mcp/
