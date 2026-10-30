@@ -102,6 +102,75 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn('CMD ["python", "/app/server.py"]', dockerfile)
         self.assertEqual((ROOT / "src" / "demo" / ".dockerignore").read_text().splitlines()[0], "*")
 
+    def test_owner_and_dependency_updates(self):
+        ownership = (ROOT / ".github" / "CODEOWNERS").read_text().splitlines()
+        self.assertEqual([line for line in ownership if line and not line.startswith("#")],
+                         ["* @seilorjunior"])
+        dependabot = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+        self.assertEqual(dependabot["version"], 2)
+        updates = {item["package-ecosystem"]: item for item in dependabot["updates"]}
+        self.assertEqual(set(updates), {"github-actions", "pip"})
+        for update in updates.values():
+            self.assertEqual(update["directory"], "/")
+            self.assertEqual(update["schedule"]["interval"], "weekly")
+            self.assertGreater(update["open-pull-requests-limit"], 0)
+
+    def test_actions_are_pinned_to_full_commits(self):
+        documents = list((ROOT / ".github" / "workflows").glob("*.yml"))
+        documents.extend((ROOT / ".github" / "actions").rglob("action.yml"))
+
+        def verify_uses(node):
+            if isinstance(node, dict):
+                if "uses" in node:
+                    reference = node["uses"]
+                    if reference.startswith("./"):
+                        self.assertTrue((ROOT / reference).exists())
+                    else:
+                        self.assertRegex(reference, r"^[^@\s]+@[a-f0-9]{40}$")
+                for value in node.values():
+                    verify_uses(value)
+            elif isinstance(node, list):
+                for item in node:
+                    verify_uses(item)
+
+        for document in documents:
+            with self.subTest(document=document.name):
+                verify_uses(yaml.load(document.read_text(), Loader=yaml.BaseLoader))
+
+    def test_deployments_are_serialized_without_cancellation(self):
+        workflow = yaml.load((ROOT / ".github" / "workflows" / "deploy.yml").read_text(),
+                             Loader=yaml.BaseLoader)
+        self.assertEqual(workflow["concurrency"]["group"],
+                         "azure-provision-${{ inputs.environment_name }}")
+        self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
+
+    def test_pr_container_is_unprivileged_and_not_published(self):
+        workflow = yaml.load((ROOT / ".github" / "workflows" / "validate.yml").read_text(),
+                             Loader=yaml.BaseLoader)
+        self.assertIn("pull_request", workflow["on"])
+        self.assertNotIn("pull_request_target", workflow["on"])
+        job = workflow["jobs"]["container"]
+        self.assertEqual(job["permissions"], {"contents": "read"})
+        self.assertNotIn("environment", job)
+        self.assertLessEqual(int(job["timeout-minutes"]), 15)
+        build = next(step for step in job["steps"] if "docker build" in step.get("run", ""))
+        self.assertIn('PYTHON_IMAGE=$base_digest', build["run"])
+        smoke = next(step for step in job["steps"] if step.get("uses") == "./.github/actions/container-smoke")
+        self.assertEqual(smoke["with"]["image"], "regional-demo:validation")
+        serialized = json.dumps(job)
+        for forbidden in ("docker push", "docker login", "secrets.", "id-token", "packages: write"):
+            self.assertNotIn(forbidden, serialized)
+        action = yaml.safe_load((ROOT / ".github" / "actions" / "container-smoke" / "action.yml").read_text())
+        self.assertEqual(action["runs"]["using"], "composite")
+        command = action["runs"]["steps"][0]["run"]
+        for required in ("--read-only", "--cap-drop ALL", "no-new-privileges",
+                         "127.0.0.1::8080", "id -u", "trap cleanup EXIT", "docker rm -f",
+                         "/health/ready", '.service == "regional-demo"'):
+            self.assertIn(required, command)
+        release = yaml.safe_load((ROOT / ".github" / "workflows" / "release-image.yml").read_text())
+        self.assertTrue(any(step.get("uses") == "./.github/actions/container-smoke"
+                            for step in release["jobs"]["image"]["steps"]))
+
     def test_platform_hooks_and_script_layout(self):
         project = yaml.safe_load((ROOT / "azure.yaml").read_text())
         for hook, stem in (("preprovision", "pre-provision"), ("postprovision", "post-provision")):

@@ -1,0 +1,29 @@
+name: Smoke-test demo container
+description: Verify the demo image runs non-root and read-only without publishing it.
+inputs:
+  image:
+    description: Locally built Docker image to test
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Run hardened container and verify HTTP contracts
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE_TAG")" = '10001:10001'
+        id=$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges -e REGION=eastus -p 127.0.0.1::8080 "$IMAGE_TAG")
+        cleanup() {
+          code=$?
+          trap - EXIT
+          docker logs "$id" || code=1
+          docker rm -f "$id" || code=1
+          exit "$code"
+        }
+        trap cleanup EXIT
+        test "$(docker exec "$id" id -u)" = 10001
+        address=$(docker port "$id" 8080/tcp)
+        curl --fail --silent --show-error --max-time 10 --retry 10 --retry-connrefused --retry-delay 1 "http://$address/health/ready" | jq -e '.status == "ok" and .region == "eastus"'
+        curl --fail --silent --show-error --max-time 10 "http://$address/" | jq -e '.service == "regional-demo" and .region == "eastus"'

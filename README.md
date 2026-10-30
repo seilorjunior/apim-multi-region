@@ -316,14 +316,34 @@ It has **no automatic restoration** and does not preserve a custom original coun
 ## 7. CI and approved immutable releases
 
 - [Validate](./.github/workflows/validate.yml): PR/push/manual/reusable validation;
-  Windows PowerShell/ARM checks and a mandatory Ubuntu native-Bash job.
+  Windows PowerShell/ARM checks, a mandatory Ubuntu native-Bash job, and an Ubuntu
+  container build/smoke test. The container job uses read-only permissions, never
+  logs into a registry or publishes an image, and tests non-root/read-only execution.
+  PR checks run without Azure credentials.
 - [Release immutable image](./.github/workflows/release-image.yml): manual,
   validation-gated build; resolves the base digest, scans HIGH/CRITICAL
   vulnerabilities, smoke-tests non-root/read-only execution, then publishes GHCR.
   The `release-image` artifact contains the full digest reference.
 - [Deploy approved PoC](./.github/workflows/deploy.yml): manual, validation-gated,
   OIDC deployment of an approved image using existing hooks and a final live check.
+  Runs targeting the same azd environment are serialized; a newer run does not
+  cancel an in-progress provisioning operation. GitHub may replace an older
+  pending run with a newer pending run; this is not a FIFO deployment queue.
+  Local/manual operations outside this workflow still require coordination.
   **Not a production pipeline.**
+
+External GitHub Actions are pinned to full commit SHAs. Weekly
+[Dependabot updates](./.github/dependabot.yml) propose GitHub Actions and Python
+test dependency updates; review them and let required checks run before merging.
+Tool versions in [toolchain.json](./scripts/toolchain.json) and Bicep module
+versions still require coordinated manual updates.
+
+[CODEOWNERS](./.github/CODEOWNERS) assigns every path to `@seilorjunior`, including
+workflow and ownership changes. The main-branch ruleset must require code-owner
+approval and the `local`, `native-bash`, and `container` checks. Keep owner-only
+bypass configured separately in GitHub; this file does not grant bypass access.
+GitHub authors cannot approve their own PRs, so owner-authored changes need
+another eligible owner or an explicit use of the owner's bypass.
 
 Before enabling release/deployment:
 

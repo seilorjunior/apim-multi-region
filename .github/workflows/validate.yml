@@ -8,15 +8,34 @@ on:
 permissions:
   contents: read
 jobs:
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build demo image without publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_version=$(jq -r .python scripts/toolchain.json)
+          base="docker.io/library/python:$python_version-alpine"
+          docker pull "$base"
+          base_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$base")
+          docker build --pull --build-arg "PYTHON_IMAGE=$base_digest" -t regional-demo:validation src/demo
+      - uses: ./.github/actions/container-smoke
+        with:
+          image: regional-demo:validation
   native-bash:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Read pinned versions
         id: versions
         shell: bash
         run: echo "python=$(jq -r .python scripts/toolchain.json)" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ steps.versions.outputs.python }}
       - name: Install pinned native tools
@@ -33,14 +52,14 @@ jobs:
   local:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Read pinned versions
         id: versions
         shell: pwsh
         run: |
           $versions = Get-Content .\scripts\toolchain.json -Raw | ConvertFrom-Json
           "python=$($versions.python)" >> $env:GITHUB_OUTPUT
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ steps.versions.outputs.python }}
       - name: Install pinned PowerShell and Bicep

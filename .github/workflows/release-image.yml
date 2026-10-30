@@ -14,7 +14,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Require protected environment
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,15 +48,9 @@ jobs:
           "$RUNNER_TEMP/trivy" image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL "$image"
           echo "tag=$image" >> "$GITHUB_OUTPUT"
       - name: Smoke-test image
-        shell: bash
-        env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-        run: |
-          set -euo pipefail
-          id=$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges -e REGION=eastus -p 127.0.0.1:8080:8080 "$IMAGE_TAG")
-          trap 'docker logs "$id"; docker rm -f "$id"' EXIT
-          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/health/ready | jq -e '.status == "ok" and .region == "eastus"'
-          curl --fail http://127.0.0.1:8080/ | jq -e '.service == "regional-demo" and .region == "eastus"'
+        uses: ./.github/actions/container-smoke
+        with:
+          image: ${{ steps.image.outputs.tag }}
       - name: Publish scanned image and record digest
         shell: bash
         env:
@@ -71,7 +65,7 @@ jobs:
           docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG" > release-image.txt
           grep -Eq '^ghcr.io/.+@sha256:[a-f0-9]{64}$' release-image.txt
           cat release-image.txt >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-image
           path: release-image.txt

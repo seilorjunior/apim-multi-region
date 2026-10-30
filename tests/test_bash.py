@@ -76,6 +76,44 @@ class BashTests(unittest.TestCase):
                     result = self.run_bash(f"bash scripts/bash/{path.name} --help")
                     self.assertIn("Usage:", result.stdout)
 
+    def test_shared_container_smoke_action(self):
+        action = yaml.safe_load((ROOT / ".github" / "actions" / "container-smoke" / "action.yml").read_text())
+        script = action["runs"]["steps"][0]["run"]
+        mock = r'''
+IMAGE_TAG=local:test
+docker() {
+    case "$1 $2" in
+        'image inspect')
+            if [[ "$SCENARIO" == WrongUser ]]; then printf root; else printf '10001:10001'; fi ;;
+        'run -d')
+            if [[ "$SCENARIO" == RunFailure ]]; then return 42; fi
+            printf container-id ;;
+        'exec container-id') printf 10001 ;;
+        'port container-id') printf '127.0.0.1:49152' ;;
+        'logs container-id') printf 'CONTAINER_LOGS\n' >&2 ;;
+        'rm -f') printf 'CONTAINER_REMOVED\n' >&2 ;;
+        *) printf 'Unexpected Docker command: %s\n' "$*" >&2; return 99 ;;
+    esac
+}
+curl() {
+    if [[ "$SCENARIO" == HttpFailure ]]; then return 22; fi
+    if [[ "${*: -1}" == */health/ready ]]; then
+        printf '{"status":"ok","region":"eastus"}'
+    else
+        printf '{"service":"regional-demo","region":"eastus"}'
+    fi
+}
+'''
+        for scenario in ("Success", "WrongUser", "RunFailure", "HttpFailure"):
+            with self.subTest(scenario=scenario):
+                result = self.run_bash("SCENARIO=" + scenario + "\n" + mock + script,
+                                       success=scenario == "Success")
+                if scenario in ("Success", "HttpFailure"):
+                    self.assertIn("CONTAINER_LOGS", result.stderr)
+                    self.assertIn("CONTAINER_REMOVED", result.stderr)
+                else:
+                    self.assertNotIn("CONTAINER_REMOVED", result.stderr)
+
     def test_guards_before_azure_access(self):
         guard = 'azd() { echo "UNEXPECTED_AZURE_ACCESS" >&2; return 99; }\nexport -f azd\n'
         result = self.run_bash(guard + "bash scripts/bash/test-failover.sh --region region1 --what-if", success=False)
