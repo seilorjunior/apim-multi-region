@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://aka.ms/azure-dev/v1.0/azure.yaml.json
+name: apim-private-multiregion-poc
+infra:
+  provider: bicep
+  path: infra
+  module: main
+hooks:
+  preprovision:
+    shell: pwsh
+    windows:
+      shell: pwsh
+      run: ./scripts/ps1/Pre-Provision.ps1
+    posix:
+      shell: sh
+      run: bash ./scripts/bash/pre-provision.sh
+    interactive: false
+    continueOnError: false
+  postprovision:
+    shell: pwsh
+    windows:
+      shell: pwsh
+      run: ./scripts/ps1/Post-Provision.ps1
+    posix:
+      shell: sh
+      run: bash ./scripts/bash/post-provision.sh
+    interactive: false
+    continueOnError: false

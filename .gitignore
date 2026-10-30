@@ -1,0 +1,24 @@
+# Local deployment settings, identities, outputs, and operator history.
+.azure/
+.env
+.env.*
+!.env.example
+.kube/
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+*.pem
+*.key
+*.pfx
+*.p12
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/*.json.tmp
+infra/main.json
+infra/modules/*.json
+infra/gateway.json
+__pycache__/
+*.pyc
+.venv/
+TestResults/

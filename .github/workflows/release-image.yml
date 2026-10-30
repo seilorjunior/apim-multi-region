@@ -1,0 +1,77 @@
+name: Release immutable image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+  image:
+    needs: validate
+    runs-on: ubuntu-24.04
+    environment: image-release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require protected environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/environments/image-release" \
+            --jq 'any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length) > 0)' | grep -qx true
+      - name: Build and scan before publication
+        id: image
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${REPOSITORY,,}:$COMMIT_SHA"
+          python_version=$(jq -r .python scripts/toolchain.json)
+          trivy_version=$(jq -r .trivy scripts/toolchain.json)
+          base="docker.io/library/python:$python_version-alpine"
+          docker pull "$base"
+          base_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$base")
+          docker build --pull --build-arg "PYTHON_IMAGE=$base_digest" -t "$image" src/demo
+          curl --fail --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$trivy_version/trivy_${trivy_version}_Linux-64bit.tar.gz" -o "$RUNNER_TEMP/trivy.tar.gz"
+          curl --fail --location --retry 3 "https://github.com/aquasecurity/trivy/releases/download/v$trivy_version/trivy_${trivy_version}_checksums.txt" -o "$RUNNER_TEMP/checksums.txt"
+          expected=$(grep " trivy_${trivy_version}_Linux-64bit.tar.gz$" "$RUNNER_TEMP/checksums.txt" | awk '{print $1}')
+          test -n "$expected"
+          echo "$expected  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP" trivy
+          "$RUNNER_TEMP/trivy" image --scanners vuln --exit-code 1 --severity HIGH,CRITICAL "$image"
+          echo "tag=$image" >> "$GITHUB_OUTPUT"
+      - name: Smoke-test image
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+          id=$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges -e REGION=eastus -p 127.0.0.1:8080:8080 "$IMAGE_TAG")
+          trap 'docker logs "$id"; docker rm -f "$id"' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:8080/health/ready | jq -e '.status == "ok" and .region == "eastus"'
+          curl --fail http://127.0.0.1:8080/ | jq -e '.service == "regional-demo" and .region == "eastus"'
+      - name: Publish scanned image and record digest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io' EXIT
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          docker push "$IMAGE_TAG"
+          docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG" > release-image.txt
+          grep -Eq '^ghcr.io/.+@sha256:[a-f0-9]{64}$' release-image.txt
+          cat release-image.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-image
+          path: release-image.txt

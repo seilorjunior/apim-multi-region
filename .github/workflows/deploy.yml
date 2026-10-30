@@ -1,0 +1,86 @@
+name: Deploy approved PoC
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: Existing or new azd environment name
+        required: true
+        default: poc-apim-private
+      image:
+        description: Scanned public image reference pinned by sha256 digest
+        required: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+  deploy:
+    needs: validate
+    runs-on: windows-2025
+    environment: azure-deployment
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require protected environment
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $protected = gh api "repos/$env:GH_REPO/environments/azure-deployment" --jq 'any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length) > 0)'
+          if ($LASTEXITCODE -ne 0 -or $protected -ne 'true') { throw 'Configure required reviewers on azure-deployment first.' }
+      - name: Read pinned versions
+        id: versions
+        shell: pwsh
+        run: |
+          $versions = Get-Content .\scripts\toolchain.json -Raw | ConvertFrom-Json
+          "azd=$($versions.azd)" >> $env:GITHUB_OUTPUT
+      - name: Install pinned PowerShell and Bicep
+        shell: pwsh
+        run: .\scripts\ps1\Install-CiTools.ps1
+      - uses: Azure/setup-azd@v2
+        with:
+          version: ${{ steps.versions.outputs.azd }}
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Initialize and provision
+        shell: pwsh
+        env:
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          DEMO_IMAGE: ${{ inputs.image }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          PUBLISHER_EMAIL: ${{ vars.APIM_PUBLISHER_EMAIL }}
+          AKS_ADMIN_GROUP: ${{ vars.AKS_ADMIN_GROUP_OBJECT_ID }}
+          REGION1_LOCATION: ${{ vars.REGION1_LOCATION }}
+          REGION2_LOCATION: ${{ vars.REGION2_LOCATION }}
+        run: |
+          . .\scripts\ps1\Common.ps1
+          if ($env:DEMO_IMAGE -cnotmatch '^[a-z0-9][a-z0-9./:_-]*@sha256:[a-f0-9]{64}$') { throw 'Immutable image digest required.' }
+          foreach ($name in @('AZURE_CLIENT_ID', 'PUBLISHER_EMAIL', 'AKS_ADMIN_GROUP', 'REGION1_LOCATION', 'REGION2_LOCATION')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing $name." }
+          }
+          Invoke-CheckedCommand azd @('auth', 'login', '--client-id', $env:AZURE_CLIENT_ID, '--tenant-id', $env:AZURE_TENANT_ID, '--federated-credential-provider', 'github')
+          .\scripts\ps1\Initialize-Environment.ps1 -SubscriptionId $env:AZURE_SUBSCRIPTION_ID -TenantId $env:AZURE_TENANT_ID `
+            -PublisherEmail $env:PUBLISHER_EMAIL -AksAdminGroupObjectId $env:AKS_ADMIN_GROUP `
+            -EnvironmentName $env:ENVIRONMENT_NAME -Region1Location $env:REGION1_LOCATION -Region2Location $env:REGION2_LOCATION
+          Set-ProjectValue DEMO_IMAGE $env:DEMO_IMAGE
+          Invoke-CheckedCommand azd @('provision', '--no-prompt')
+      - name: Wait for Front Door convergence and verify
+        shell: pwsh
+        run: |
+          . .\scripts\ps1\Common.ps1
+          $passed = $false
+          for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            & pwsh -NoProfile -File .\scripts\ps1\Test-EndToEnd.ps1 -Samples 3
+            if ($LASTEXITCODE -eq 0) { $passed = $true; break }
+            Write-Warning 'End-to-end check failed; waiting for propagation.'
+            Start-Sleep -Seconds 30
+          }
+          if (-not $passed) { throw 'Deployment was not verified. Inspect Azure before retrying.' }
