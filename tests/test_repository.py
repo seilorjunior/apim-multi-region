@@ -165,7 +165,7 @@ class RepositoryTests(unittest.TestCase):
         command = action["runs"]["steps"][0]["run"]
         for required in ("--read-only", "--cap-drop ALL", "no-new-privileges",
                          "127.0.0.1::8080", "id -u", "trap cleanup EXIT", "docker rm -f",
-                         "/health/ready", '.service == "regional-demo"'):
+                         "--retry-all-errors", "/health/ready", '.service == "regional-demo"'):
             self.assertIn(required, command)
         release = yaml.safe_load((ROOT / ".github" / "workflows" / "release-image.yml").read_text())
         self.assertTrue(any(step.get("uses") == "./.github/actions/container-smoke"
