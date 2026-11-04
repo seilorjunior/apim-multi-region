@@ -1,8 +1,10 @@
-# apim-multi-region
+# Dual-APIM Multi-Region Architecture: Two APIM Instances, One per Region
 
-Azure Front Door Premium and WAF route public HTTPS traffic through Private Link
-to two independent APIM Standard v2 gateways, each backed by a private AKS cluster.
-The project uses Azure Developer CLI (`azd`) and Bicep.
+This project uses **two independent Azure API Management (APIM) Standard v2
+instances, one per region**, rather than a single APIM instance deployed across
+multiple regions. Azure Front Door Premium and WAF route public HTTPS traffic
+through Private Link to each regional APIM gateway, each backed by a private AKS
+cluster. The project uses Azure Developer CLI (`azd`) and Bicep.
 
 **Start here:** [complete script guide](./scripts/README.md) |
 [PowerShell scripts](./scripts/ps1/) | [native Bash scripts](./scripts/bash/) |
