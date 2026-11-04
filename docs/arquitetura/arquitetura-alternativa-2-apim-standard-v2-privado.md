@@ -119,10 +119,12 @@ Cada APIM deve ter seu backend configurado para o **AKS local**. Não é necess�
 2. Cadastrar uma origem APIM no Front Door Premium com Private Link habilitado para o gateway.
 3. Aprovar no APIM a conexão de Private Endpoint solicitada pelo Front Door autorizado.
 4. Configurar hostname de origem, origin host header e validação de certificado TLS conforme o hostname do APIM.
-5. Validar o tráfego pela conexão privada.
+5. Verificar a aprovação e a correlação entre a conexão privada e a origem esperada, sem depender de uma API publicada.
 6. Desabilitar **Public network access** no gateway da instância APIM.
-7. Confirmar que chamadas diretas pela internet ao hostname do gateway não conseguem consumir as APIs.
-8. Repetir para a segunda região.
+7. Repetir para a segunda região e verificar que o acesso público está desabilitado em **ambos** os gateways antes de publicar APIs.
+8. Após a publicação, validar o tráfego pelo Front Door e confirmar que chamadas diretas pela internet ao hostname de cada gateway não conseguem consumir as APIs.
+
+A sequência completa está na seção 12. A aprovação e a configuração da conexão não substituem o teste ponta a ponta após a publicação.
 
 No Standard v2, a documentação descreve a desativação em **Network > Edit > Inbound features > Public network access > Disable**. Confirmar os nomes atuais no portal.
 
@@ -175,6 +177,12 @@ Front Door -> Private Link -> APIM regional -> AKS local -> endpoint de readines
 - Definir como a probe será autorizada, sem divulgar segredos nem detalhes sensíveis.
 - Ajustar frequência e limiares para equilibrar detecção de falhas e estabilidade.
 - Definir readiness conforme a capacidade real da aplicação, inclusive escrita quando necessária.
+
+### Configuração implementada na PoC
+
+O [módulo Front Door](../../infra/modules/front-door.bicep) configura probe HTTPS `GET /demo/health/ready`, com intervalo de **30 segundos** e exigência de **3 amostras saudáveis entre as últimas 4**. O APIM encaminha a chamada ao backend em `/health/ready`. As duas origens têm **prioridade `1` e peso `1000`**, sem preferência primária/secundária; a janela adicional de latência é de 50 ms.
+
+Esses valores são **configuração, não garantia de tempo de failover ou recuperação**. As observações das probes e a propagação da configuração precisam convergir, e chamadas podem falhar nesse intervalo. Prioridades e pesos iguais não garantem divisão 50/50, pois o Front Door também considera latência. A frequência de amostragem e a sequência de sucessos dos scripts medem respostas do cliente, não alteram essas probes nem comprovam um RTO de DR.
 
 ### Cenários de falha
 
@@ -267,18 +275,20 @@ Private Link de entrada no APIM está associado ao gateway. Ele não deve ser in
 
 Menos componentes não garante menor custo total. Comparar capacidade, recursos necessários, tráfego, Private Link e esforço operacional sem pressupor uma economia percentual.
 
-Documento da primeira alternativa: [Arquitetura com APIM Premium clássico interno e proxies](../arquitetura-1/arquitetura-multi-regiao-aks-apim.md).
+A alternativa 1 é apresentada apenas para comparação; seu documento não está incluído neste repositório.
 
 ## 12. Sequência de implantação e critérios de aceite
 
+Esta ordem preserva o requisito do [bootstrap implementado com azd](../../README.md#bootstrap-order-and-privacy-gate): **ambos os gateways devem estar privados antes de publicar APIs**. O provisionamento cria a infraestrutura em conjunto; o hook `postprovision` aprova e verifica as conexões, desabilita e verifica o acesso público nos dois APIM e só então instala as aplicações e publica a API demo. A criação inicial pode exigir gateways públicos, mas sem a API demo. O teste ponta a ponta ocorre somente após a publicação e a convergência do Front Door.
+
 1. Confirmar regiões, disponibilidade dos recursos, quotas, requisitos de dados e metas de recuperação.
-2. Provisionar as redes e os clusters AKS privados.
-3. Implantar e validar as aplicações pelos ingressos internos.
-4. Criar os dois APIM Standard v2 e configurar a integração de saída.
-5. Publicar APIs e políticas por pipeline e testar o backend privado de cada instância.
-6. Configurar Front Door Premium, WAF, domínio e duas origens Private Link.
-7. Aprovar as conexões, testar o tráfego privado e desabilitar o acesso público aos gateways.
-8. Configurar e validar probes ponta a ponta.
+2. Provisionar as redes, os clusters AKS privados e os dois APIM Standard v2 com integração de saída.
+3. Configurar Front Door Premium, WAF, domínio e duas origens Private Link.
+4. Aprovar as conexões corretas e verificar sua correlação com as origens esperadas.
+5. Desabilitar e verificar o acesso público em **ambos** os gateways APIM; interromper a publicação se qualquer verificação falhar.
+6. Implantar e validar as aplicações pelos ingressos internos.
+7. Publicar APIs e políticas por pipeline e testar o backend privado de cada instância.
+8. Aguardar a convergência da configuração e das probes ponta a ponta; validar chamadas pelo Front Door e a negação de acesso direto aos dois APIM.
 9. Executar testes de falha, capacidade e recuperação de dados.
 10. Medir RTO/RPO e registrar os procedimentos de operação e failback.
 

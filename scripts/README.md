@@ -10,6 +10,17 @@ Start with `azd env select <environment-name>` and verify selection before any
 live operation. Authentication/configuration inside WSL may differ from Windows.
 Do not run both shell versions of a mutating operation concurrently.
 
+## Contents
+
+- [Script inventory](#layout-and-complete-inventory) and [dependencies](#dependencies-and-conventions)
+- [Environment setup](#initialize-environment)
+- [Deployment preflight](#pre-provision) and [private bootstrap/publication](#post-provision)
+- [Live verification](#test-endtoend)
+- [Controlled failover](#test-failover), [manual recovery](#manual-recovery), and [manual availability changes](#set-demoavailability)
+- [Local validation and tests](#invoke-validation)
+- [Troubleshooting](#troubleshooting)
+- [Costs and destructive cleanup](../README.md#networking-cost-and-cleanup)
+
 ## Layout and complete inventory
 
 ```text
@@ -245,6 +256,11 @@ and an attempt to restore the original state. **Not a regional DR/RPO test.**
 Reserve survivor capacity, prevent concurrent operations, and keep manual recovery
 access. It does not delete infrastructure or test a complete Azure region outage.
 
+See the [implemented Front Door settings](../README.md#implemented-front-door-settings)
+for the probe path, interval, healthy-sample requirement, and origin priorities/
+weights. The sampling options below measure client responses; they do not
+reconfigure those probes or guarantee a failover/recovery time.
+
 | PowerShell | Bash | Default/range |
 |---|---|---|
 | `-Region` | `--region` | Required: `br`, `us`, `region1`, or `region2`. |
@@ -313,6 +329,8 @@ must have both `Passed:true` and `Restored:true`; preserve errors from failed ru
 Sampling begins **after** the fault command completes. Observed convergence includes
 that unobserved command interval plus the success streak, not precise outage duration
 or a validated DR RTO. No persistent data exists, so no RPO is measured.
+
+### Manual recovery
 
 For exact manual recovery after a failed exercise, use an authorized cluster
 administrator to scale `private-poc/deployment/regional-demo` to `OriginalReplicas`

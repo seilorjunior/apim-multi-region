@@ -10,6 +10,17 @@ cluster. The project uses Azure Developer CLI (`azd`) and Bicep.
 [PowerShell scripts](./scripts/ps1/) | [native Bash scripts](./scripts/bash/) |
 [local tests](./tests/).
 
+## Contents
+
+- [Local application quickstart (no Azure)](#local-application-quickstart-no-azure)
+- [Prerequisites](#1-prerequisites), [environment setup](#2-initialize-the-local-environment), and [local validation](#3-validate-locally-without-azure-access)
+- [Deployment and privacy gate](#4-provision-only-after-approval)
+- [Bootstrap recovery](#resume-after-a-failed-bootstrap) and [live verification](#5-verify-the-deployed-environment)
+- [Failover settings, exercise, and recovery](#6-exercise-backend-failover-safely)
+- [CI and releases](#7-ci-and-approved-immutable-releases) and [observability](#8-opt-in-observability-and-availability-profile)
+- [Troubleshooting](./scripts/README.md#troubleshooting) and [manual replica recovery](./scripts/README.md#manual-recovery)
+- [Networking, costs, and cleanup](#networking-cost-and-cleanup)
+
 ```text
 Internet -> Front Door Premium + WAF
                |                    |
@@ -96,6 +107,42 @@ Standard v2 supports inbound Private Link plus outbound VNet integration.
 | [src/demo/server.py](./src/demo/server.py) | Standard-library HTTP API, health endpoints, and JSON logs. |
 | [src/demo/Dockerfile](./src/demo/Dockerfile) | Optional immutable application image. |
 | [tests/](./tests/) | Application, script, bootstrap, failover, manifest, and ARM checks. |
+
+## Local application quickstart (no Azure)
+
+Only Python 3.10+ and an HTTP client are needed; the server uses the standard
+library. From the repository root, start it in one terminal:
+
+**Bash**
+
+```bash
+REGION=local python3 src/demo/server.py
+```
+
+**PowerShell**
+
+```powershell
+$env:REGION = "local"
+python .\src\demo\server.py
+```
+
+In another terminal, call the root and readiness endpoints:
+
+```bash
+curl --fail http://localhost:8080/
+curl --fail http://localhost:8080/health/ready
+```
+
+In PowerShell, use `curl.exe` or `Invoke-RestMethod` with those URLs. The root
+returns the `regional-demo` service and `"region": "local"`; readiness returns
+`{"status": "ok", "region": "local"}`. Stop the server with Ctrl+C. It listens on
+`0.0.0.0:8080`, so run it only on a trusted local network.
+
+These are **direct backend paths**, without `/demo/`. In Azure, Front Door uses
+`/demo/` and `/demo/health/ready`; `/demo` is the APIM API prefix, not a path
+implemented by the Python server. Local execution does **not** exercise Front
+Door, APIM policies, AKS, Private Link, or private networking. The root's message
+describes the intended deployed topology, not proof that the local call used it.
 
 ## 1. Prerequisites
 
@@ -236,6 +283,8 @@ The internal Service restricts sources to the APIM integration subnet.
 `X-Azure-FDID` validation is defense in depth, not a replacement for disabled
 public gateway access.
 
+### Resume after a failed bootstrap
+
 After correcting a failed post-bootstrap operation, resume with:
 
 ```text
@@ -278,6 +327,25 @@ Never execute/evaluate its output as shell code. A typical response is:
 Equal weights do not guarantee a 50/50 split or that one client sees both regions.
 
 ## 6. Exercise backend failover safely
+
+### Implemented Front Door settings
+
+[front-door.bicep](./infra/modules/front-door.bicep) configures:
+
+| Setting | Implemented value |
+|---|---|
+| End-to-end probe | HTTPS `GET /demo/health/ready`, forwarded through APIM to backend `/health/ready`. |
+| Probe interval | 30 seconds. |
+| Healthy-sample requirement | At least 3 successful samples out of the last 4. |
+| Origin priority | `1` for both origins (active-active, not primary/standby). |
+| Origin weight | `1000` for both origins. |
+
+These are **configuration values, not a guaranteed failover or recovery time**.
+Probe observations and configuration propagation must converge; requests can fail
+in the meantime. Front Door also considers latency (a configured 50 ms additional
+latency window), so equal priorities/weights do not promise a 50/50 split.
+The exercise's polling interval and success streak below measure client responses;
+they do not change Front Door's probe settings or establish a DR RTO.
 
 ### When one region is unavailable
 
@@ -351,7 +419,7 @@ includes that command interval and the required success streak; it is not exact
 outage duration or a demonstrated DR RTO. There is no RPO measurement.
 Process/host failure or unavailable Azure control plane can prevent restoration.
 
-For manual 0/2-replica toggles, use the [availability script](./scripts/README.md#set-demo-availability).
+For manual 0/2-replica toggles, use the [availability script](./scripts/README.md#set-demoavailability).
 It has **no automatic restoration** and does not preserve a custom original count.
 
 ## 7. CI and approved immutable releases
