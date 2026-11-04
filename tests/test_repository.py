@@ -188,13 +188,24 @@ class RepositoryTests(unittest.TestCase):
             for script in (ROOT / "scripts" / folder).glob(extension):
                 with self.subTest(script=script.name):
                     self.assertIn(f"(./{folder}/{script.name})", text)
-        for document in (ROOT / "README.md", guide, ROOT / ".github" / "SECURITY.md"):
+        architecture = (ROOT / "docs" / "arquitetura" /
+                        "arquitetura-alternativa-2-apim-standard-v2-privado.md")
+        for document in (ROOT / "README.md", guide, architecture, ROOT / ".github" / "SECURITY.md"):
             for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", document.read_text()):
-                if target.startswith(("https://", "http://", "#")):
+                if target.startswith(("https://", "http://")):
                     continue
+                relative_path, _, fragment = target.partition("#")
+                destination = document.parent / relative_path if relative_path else document
                 with self.subTest(document=document.name, target=target):
-                    self.assertTrue((document.parent / target.split("#", 1)[0]).exists(),
+                    self.assertTrue(destination.exists(),
                                     f"Broken documentation link: {target}")
+                    if fragment and destination.suffix == ".md":
+                        anchors = {
+                            re.sub(r"[^\w -]", "", heading.strip().lower()).replace(" ", "-")
+                            for heading in re.findall(r"^#{1,6}\s+(.+)$",
+                                                      destination.read_text(), re.MULTILINE)
+                        }
+                        self.assertIn(fragment, anchors, f"Broken section link: {target}")
 
     def test_readme_architecture_and_failover_svgs(self):
         readme = (ROOT / "README.md").read_text()
