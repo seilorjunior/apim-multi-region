@@ -24,10 +24,11 @@ foreach ($prefix in @('BRAZIL', 'US')) {
 }
 
 function Set-ProjectValue { param($Name, $Value) }
-function Invoke-CheckedCommand {
-    param($Command, $Arguments)
+function Invoke-ApimSync {
+    param($Values)
     if ($script:disabled.Count -ne 2) { throw 'Publication before both gateways were private.' }
     $script:publications++
+    if ($script:scenario -eq 'PublishFailure') { throw 'Simulated API publication failure.' }
 }
 function Invoke-AksChecked {
     param($ResourceGroup, $ClusterName, $Command, $File)
@@ -80,11 +81,6 @@ function Invoke-AzJson {
         if ($script:scenario -ne 'StillPublic') { $script:disabled.Add("apim-$($Arguments[3].Split('/')[-1])") }
         return @{}
     }
-    if ($Arguments[0] -eq 'deployment') {
-        if ($script:disabled.Count -ne 2) { throw 'API publication before both gateways were private.' }
-        if ($script:scenario -eq 'PublishFailure') { throw 'Simulated API publication failure.' }
-        return @{}
-    }
     throw "Unexpected test command: $($Arguments -join ' ')"
 }
 
@@ -127,7 +123,7 @@ foreach ($case in @('Pending', 'Resume', 'Timeout', 'Rejected', 'Disconnected', 
         $previousApprovals = $script:approvals
         $script:scenario = 'Resume'
         Invoke-PrivateBootstrap -Values $values -ApprovalAttempts 2 -PollSeconds 0
-        if ($script:updates -ne $previousUpdates -or $script:approvals -ne $previousApprovals -or $script:workloads -ne 3) {
+        if ($script:updates -ne $previousUpdates -or $script:approvals -ne $previousApprovals -or $script:workloads -ne 4) {
             throw 'Recovery after partial API publication must republish both regions without reopening or reapproving gateways.'
         }
     }

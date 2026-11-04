@@ -17,9 +17,9 @@ kubeconfig.*
 infra/*.json.tmp
 infra/main.json
 infra/modules/*.json
-infra/gateway.json
 __pycache__/
 *.pyc
 .venv/
 TestResults/
 .playwright-mcp/
+node_modules/

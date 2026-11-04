@@ -1,0 +1,7 @@
+{
+  "properties": {
+    "displayName": "poc-front-door-id",
+    "value": "not-configured",
+    "secret": false
+  }
+}

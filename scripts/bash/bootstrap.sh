@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 private_bootstrap() {
-    local attempts="${1:-120}" poll_seconds="${2:-15}" name profile fdid global_group origin_group
+    local attempts="${1:-120}" poll_seconds="${2:-15}" name profile global_group origin_group
     local key region marker connections matches unexpected count connection status origin_id origin approved attempt instance image command
     bounded_integer "$attempts" 1 120 ApprovalAttempts
     bounded_integer "$poll_seconds" 0 60 PollSeconds
     SUBSCRIPTION_ID="$(required AZURE_SUBSCRIPTION_ID)"
     name="$(required AZURE_ENV_NAME)"
     profile="$(required FRONT_DOOR_PROFILE_NAME)"
-    fdid="$(required FRONT_DOOR_ID)"
+    required FRONT_DOOR_ID >/dev/null
     global_group="$(required AZURE_RESOURCE_GROUP)"
     origin_group="$(required FRONT_DOOR_ORIGIN_GROUP_NAME)"
     for key in br us; do
@@ -55,7 +55,6 @@ private_bootstrap() {
     done
     BOOTSTRAP_TEMP_DIR="$(mktemp -d)"
     trap cleanup_bootstrap EXIT
-    bicep build "$PROJECT_ROOT/infra/gateway.bicep" --outfile "$BOOTSTRAP_TEMP_DIR/gateway.json"
     image="$(jq -r '.DEMO_IMAGE // ""' <<<"$ENV_JSON")"
     for key in br us; do
         region="$(region_settings "$key")"
@@ -63,21 +62,14 @@ private_bootstrap() {
             "$(jq -r .ApimSubnet <<<"$region")" "$image" > "$BOOTSTRAP_TEMP_DIR/demo.yaml"
         command="kubectl apply -f demo.yaml && kubectl -n private-poc rollout restart deployment/regional-demo && kubectl -n private-poc rollout status deployment/regional-demo --timeout=180s && kubectl -n private-poc wait --for=jsonpath='{.status.loadBalancer.ingress[0].ip}'=$(jq -r .BackendIp <<<"$region") service/regional-demo --timeout=300s"
         aks_checked "$region" "$command" "$BOOTSTRAP_TEMP_DIR/demo.yaml"
-        jq -n --arg name "$(jq -r .ApimName <<<"$region")" --arg ip "$(jq -r .BackendIp <<<"$region")" \
-            --arg region "$(jq -r .Location <<<"$region")" --arg fdid "$fdid" '{
-            "$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
-            contentVersion:"1.0.0.0", parameters:{
-                apimName:{value:$name}, backendIp:{value:$ip}, region:{value:$region}, frontDoorId:{value:$fdid}
-            }}' > "$BOOTSTRAP_TEMP_DIR/gateway.parameters.json"
-        az_json deployment group create --resource-group "$(jq -r .ResourceGroup <<<"$region")" --name private-demo-gateway \
-            --template-file "$BOOTSTRAP_TEMP_DIR/gateway.json" --parameters "@$BOOTSTRAP_TEMP_DIR/gateway.parameters.json" >/dev/null
     done
+    sync_apim
     log "Demo published at $(required API_URL). Allow Front Door propagation, then run scripts/bash/test-end-to-end.sh."
 }
 
 cleanup_bootstrap() {
     local code=$?
-    rm -f -- "$BOOTSTRAP_TEMP_DIR/demo.yaml" "$BOOTSTRAP_TEMP_DIR/gateway.json" "$BOOTSTRAP_TEMP_DIR/gateway.parameters.json" || code=1
+    rm -f -- "$BOOTSTRAP_TEMP_DIR/demo.yaml" || code=1
     rmdir -- "$BOOTSTRAP_TEMP_DIR" || code=1
     return "$code"
 }

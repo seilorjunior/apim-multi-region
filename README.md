@@ -99,7 +99,7 @@ Standard v2 supports inbound Private Link plus outbound VNet integration.
 | [infra/main.bicep](./infra/main.bicep) | Subscription-scope orchestration of three resource groups. |
 | [infra/modules/region.bicep](./infra/modules/region.bicep) | Regional network, identity, private AKS, APIM, and diagnostics. |
 | [infra/modules/front-door.bicep](./infra/modules/front-door.bicep) | Global Front Door Premium, Private Link, WAF, and diagnostics. |
-| [infra/gateway.bicep](./infra/gateway.bicep) | Demo APIs/policies, published after both gateways are private. |
+| [apim-artifacts/](./apim-artifacts/) | Shared APIOps APIs, operations, policies, and named values for both private APIMs. |
 | [scripts/README.md](./scripts/README.md) | Every script, parameters, dependencies, effects, and recovery. |
 | [scripts/ps1/](./scripts/ps1/) / [scripts/bash/](./scripts/bash/) | Equivalent PowerShell and native Bash operational paths. |
 | [scripts/toolchain.json](./scripts/toolchain.json) | Pinned CI tool versions shared by both shells. |
@@ -150,9 +150,9 @@ Choose a shell; **native Bash operations do not require PowerShell**.
 
 | Use | Requirements |
 |---|---|
-| PowerShell operations | PowerShell 7, Azure CLI, azd, Bicep CLI on `PATH`. |
-| Bash operations | Bash 4+, `jq`, `python3` 3.10+, `curl`, Azure CLI, azd, Bicep CLI. |
-| Local tests | Python 3.10+ and [requirements-test.txt](./requirements-test.txt); Bicep. PowerShell suite also needs `pwsh`. |
+| PowerShell operations | PowerShell 7, Azure CLI, azd, Bicep CLI, Node.js 22+ and npm on `PATH`. |
+| Bash operations | Bash 4+, `jq`, `python3` 3.10+, `curl`, Azure CLI, azd, Bicep CLI, Node.js 22+ and npm. |
+| Local tests | Python 3.10+ and [requirements-test.txt](./requirements-test.txt); Bicep, Node.js 22+ and `npm ci`. PowerShell suite also needs `pwsh`. |
 | CI | Versions in [toolchain.json](./scripts/toolchain.json); Linux native Bash and Windows PowerShell jobs. |
 
 Use Linux, WSL, or an appropriately configured Git Bash for Bash. The macOS
@@ -160,11 +160,22 @@ system Bash 3.2 is too old; install a current Bash. Run az/azd authentication an
 environment selection in the **same host environment** as the scripts. Windows
 and WSL tool installations/authentication stores may differ.
 
+Install the exact [Azure APIOps CLI](https://github.com/Azure/apiops-cli) dependency
+from [package-lock.json](./package-lock.json) before provisioning or syncing:
+
+```text
+npm ci --ignore-scripts --no-audit --no-fund
+```
+
+The scripts use the repository-local CLI, not a global installation.
+
 For deployment, also provide:
 
 - `az login` and `azd auth login`.
 - Subscription permissions to create resources and assign network/identity RBAC.
 - APIM Private Endpoint approval and public-access update permissions.
+- APIM configuration read/write permissions for APIOps publishing (for example,
+  API Management Service Contributor scoped to each APIM).
 - AKS `runcommand/action` and `commandResults/read` permissions.
 - The object ID of a real **Entra security group** for AKS administration, plus
   Microsoft Graph access to read that group.
@@ -267,7 +278,8 @@ native Bash hooks on POSIX. Select the intended environment before either path.
    only one correlated request per origin, and rejects ambiguity/unexpected approvals.
 5. It verifies APIM approval and Front Door origin resource/group/marker correlation.
 6. It disables and verifies public gateway access on **both** APIMs.
-7. Only then does it deploy the workloads and publish `/demo/` APIs.
+7. Only then does it deploy both workloads and use APIOps to publish the shared
+   `/demo/` artifacts to both APIMs with regional backend/header overrides.
 8. Allow Front Door configuration and health probes to converge before end-to-end testing.
 
 APIM needs a Private Endpoint before public access can be disabled. Initial
@@ -293,6 +305,39 @@ azd hooks run postprovision
 
 This changes live resources. It preserves privacy and reapplies workloads/APIs.
 Do not edit connection markers or run parallel provisioning/failover operations.
+
+### Sync API changes to both APIMs
+
+[apim-artifacts/](./apim-artifacts/) is the single source of truth for API
+configuration; Bicep owns infrastructure only. After reviewing artifact changes,
+select the provisioned azd environment and preview/publish without reprovisioning
+infrastructure or restarting workloads:
+
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -DryRun
+.\scripts\ps1\Sync-Apim.ps1
+```
+
+```bash
+bash scripts/bash/sync-apim.sh --dry-run
+bash scripts/bash/sync-apim.sh
+```
+
+Both paths verify **both** gateways are private, their approved Private Link
+requests are correlated, and Front Door origins match before publishing anything.
+They publish the same full artifact set sequentially; generated temporary
+overrides supply each backend IP, actual region, and Front Door ID. The
+`poc-front-door-id` and `poc-region` named values are owned by this repository.
+Existing `/demo/` routes, correlation, no-cache behavior, and FDID validation are
+preserved. Authentication uses the Azure CLI session/managed identity through
+APIOps `DefaultAzureCredential`; no keys or client secrets are checked in.
+
+This is Git-to-both reconciliation, not continuous portal-to-portal replication.
+Untracked APIs are preserved: no `--delete-unmatched` or incremental commit mode
+is used. Removing a file does not delete the live resource; deletions require a
+separately reviewed procedure. A partial failure exits nonzero and is not atomic
+across regions. Correct it and rerun the same command for both; do not reopen
+public access. See the [script reference](./scripts/README.md#sync-apim) for CI setup.
 
 ## 5. Verify the deployed environment
 
@@ -440,10 +485,15 @@ It has **no automatic restoration** and does not preserve a custom original coun
   pending run with a newer pending run; this is not a FIFO deployment queue.
   Local/manual operations outside this workflow still require coordination.
   **Not a production pipeline.**
+- [Sync both private APIMs](./.github/workflows/sync-apim.yml): manual,
+  validation-gated and protected by `azure-deployment`; defaults to dry-run.
+  Publishes Git artifacts to both existing APIMs without reprovisioning.
+  Shares the deployment concurrency group. Configure the environment output
+  metadata described in the [sync reference](./scripts/README.md#sync-apim).
 
 External GitHub Actions are pinned to full commit SHAs. Weekly
-[Dependabot updates](./.github/dependabot.yml) propose GitHub Actions and Python
-test dependency updates; review them and let required checks run before merging.
+[Dependabot updates](./.github/dependabot.yml) propose GitHub Actions, Python test
+dependencies, and npm/APIOps updates; review them and let required checks run before merging.
 Tool versions in [toolchain.json](./scripts/toolchain.json) and Bicep module
 versions still require coordinated manual updates.
 

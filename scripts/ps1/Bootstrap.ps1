@@ -7,7 +7,7 @@ param(
 $script:ProjectSubscriptionId = Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID'
 $environmentName = Get-RequiredValue $values 'AZURE_ENV_NAME'
 $profileName = Get-RequiredValue $values 'FRONT_DOOR_PROFILE_NAME'
-$frontDoorId = Get-RequiredValue $values 'FRONT_DOOR_ID'
+$null = Get-RequiredValue $values 'FRONT_DOOR_ID'
 $globalResourceGroup = Get-RequiredValue $values 'AZURE_RESOURCE_GROUP'
 $originGroup = Get-RequiredValue $values 'FRONT_DOOR_ORIGIN_GROUP_NAME'
 $regions = @(Get-RegionalSettings $values)
@@ -72,35 +72,17 @@ foreach ($region in $regions) {
 $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "apim-poc-$([guid]::NewGuid().ToString('N'))"
 $null = New-Item -ItemType Directory -Path $tempDirectory
 $manifestPath = Join-Path $tempDirectory 'demo.yaml'
-$parametersPath = Join-Path $tempDirectory 'gateway.parameters.json'
-$templatePath = Join-Path $tempDirectory 'gateway.json'
 try {
-    Invoke-CheckedCommand bicep @('build', (Join-Path $script:ProjectRoot 'infra\gateway.bicep'), '--outfile', $templatePath) | Out-Null
     foreach ($region in $regions) {
         $image = if ($values.Contains('DEMO_IMAGE')) { [string]$values.DEMO_IMAGE } else { '' }
         $manifest = New-DemoManifest -Region $region.Location -BackendIp $region.BackendIp -ApimSubnet $region.ApimSubnet -Image $image
         [System.IO.File]::WriteAllText($manifestPath, $manifest)
         $command = "kubectl apply -f demo.yaml && kubectl -n private-poc rollout restart deployment/regional-demo && kubectl -n private-poc rollout status deployment/regional-demo --timeout=180s && kubectl -n private-poc wait --for=jsonpath='{.status.loadBalancer.ingress[0].ip}'=$($region.BackendIp) service/regional-demo --timeout=300s"
         Invoke-AksChecked -ResourceGroup $region.ResourceGroup -ClusterName $region.AksName -Command $command -File $manifestPath
-        $parameters = @{
-            '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
-            contentVersion = '1.0.0.0'
-            parameters = @{
-                apimName = @{ value = $region.ApimName }
-                backendIp = @{ value = $region.BackendIp }
-                region = @{ value = $region.Location }
-                frontDoorId = @{ value = $frontDoorId }
-            }
-        }
-        [System.IO.File]::WriteAllText($parametersPath, ($parameters | ConvertTo-Json -Depth 10))
-        Invoke-AzJson -Arguments @(
-            'deployment', 'group', 'create', '--resource-group', $region.ResourceGroup,
-            '--name', 'private-demo-gateway', '--template-file', $templatePath,
-            '--parameters', "@$parametersPath"
-        ) | Out-Null
     }
+    Invoke-ApimSync -Values $values
 } finally {
-    foreach ($file in @($manifestPath, $parametersPath, $templatePath)) {
+    foreach ($file in @($manifestPath)) {
         if (Test-Path -LiteralPath $file) {
             Remove-Item -LiteralPath $file
         }

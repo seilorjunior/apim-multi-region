@@ -1,0 +1,10 @@
+{
+  "name": "dual-apim-multi-region",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@azure-tools/apiops-cli": "1.0.5"
+  }
+}

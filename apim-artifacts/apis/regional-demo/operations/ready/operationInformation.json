@@ -1,0 +1,8 @@
+{
+  "properties": {
+    "displayName": "Backend readiness",
+    "method": "GET",
+    "urlTemplate": "/health/ready",
+    "responses": [{"statusCode": 200}]
+  }
+}

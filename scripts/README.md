@@ -15,6 +15,7 @@ Do not run both shell versions of a mutating operation concurrently.
 - [Script inventory](#layout-and-complete-inventory) and [dependencies](#dependencies-and-conventions)
 - [Environment setup](#initialize-environment)
 - [Deployment preflight](#pre-provision) and [private bootstrap/publication](#post-provision)
+- [APIOps synchronization](#sync-apim)
 - [Live verification](#test-endtoend)
 - [Controlled failover](#test-failover), [manual recovery](#manual-recovery), and [manual availability changes](#set-demoavailability)
 - [Local validation and tests](#invoke-validation)
@@ -36,6 +37,7 @@ scripts/
 | [Initialize-Environment.ps1](./ps1/Initialize-Environment.ps1) | [initialize-environment.sh](./bash/initialize-environment.sh) | Query subscription tenant; create/select and populate a **local** azd environment. No provisioning. |
 | [Pre-Provision.ps1](./ps1/Pre-Provision.ps1) | [pre-provision.sh](./bash/pre-provision.sh) | Preflight: read Azure configuration, set local defaults, preserve disabled APIM access. No resource creation. |
 | [Post-Provision.ps1](./ps1/Post-Provision.ps1) | [post-provision.sh](./bash/post-provision.sh) | **Mutates Azure:** private bootstrap, workloads, and API publication. |
+| [Sync-Apim.ps1](./ps1/Sync-Apim.ps1) | [sync-apim.sh](./bash/sync-apim.sh) | **Mutates APIM configuration:** publish shared Git artifacts to both private APIMs; optional dry-run. |
 | [Test-EndToEnd.ps1](./ps1/Test-EndToEnd.ps1) | [test-end-to-end.sh](./bash/test-end-to-end.sh) | Read live Azure configuration and send direct/Front Door HTTP requests. No resource mutation. |
 | [Set-DemoAvailability.ps1](./ps1/Set-DemoAvailability.ps1) | [set-demo-availability.sh](./bash/set-demo-availability.sh) | **Mutates live replicas** to 0 or 2. No automatic restoration. |
 | [Test-Failover.ps1](./ps1/Test-Failover.ps1) | [test-failover.sh](./bash/test-failover.sh) | **Disrupts one backend**, measures responses, attempts restoration, writes JSON evidence. |
@@ -43,6 +45,7 @@ scripts/
 | [Install-CiTools.ps1](./ps1/Install-CiTools.ps1) | [install-ci-tools.sh](./bash/install-ci-tools.sh) | Download tools on disposable CI runners; no Azure access. Not a workstation installer. |
 | [Common.ps1](./ps1/Common.ps1) | [common.sh](./bash/common.sh) | Shared environment, validation, rendering, Azure/AKS, and HTTP helpers. **Library, not an entry point.** |
 | [Bootstrap.ps1](./ps1/Bootstrap.ps1) | [bootstrap.sh](./bash/bootstrap.sh) | Private Link correlation/approval and privacy-gated publication. **Library, called by postprovision.** |
+| [ApiOps.ps1](./ps1/ApiOps.ps1) | [apiops.sh](./bash/apiops.sh) | Two-target privacy verification, regional overrides, and APIOps publication. **Library, not an entry point.** |
 | [Failover.ps1](./ps1/Failover.ps1) | [failover.sh](./bash/failover.sh) | Measurement, report, and recovery logic. **Library, called by the guarded failover entry point.** |
 
 Old root-level PowerShell paths have moved. Update external automation from
@@ -57,6 +60,11 @@ Do not move [toolchain.json](./toolchain.json) into either shell directory.
 - **Bash:** Bash 4+, `jq`, Python 3.10+ available as `python3`, `curl`, az, azd,
   and Bicep for the full operational workflow. Validation needs Bash/jq/Python/Bicep,
   not az/azd/pwsh. Scripts report missing required commands.
+- **APIOps:** Node.js 22+ and npm in the selected host environment.
+  Run `npm ci --ignore-scripts --no-audit --no-fund` from the repository root
+  before postprovision, sync, or local validation. The exact CLI dependency and
+  transitive integrity hashes are recorded in [package.json](../package.json)
+  and [package-lock.json](../package-lock.json).
 - Bash 3.2 shipped with macOS is unsupported. Linux/WSL is the native CI path;
   Git Bash requires usable native tools and compatible authentication.
 - Bash files must retain **LF**, not CRLF. [editor settings](../.editorconfig) and
@@ -154,9 +162,11 @@ Through the Bootstrap library it:
 3. Polls approval/configuration (up to 120 attempts, with 15-second polling).
 4. Disables and verifies public access on **both** APIM gateways before publishing.
 5. Renders the shared Kubernetes template and installs it using AKS Run Command.
-6. Compiles/deploys the regional API template and prints the end-to-end command.
+6. Uses [APIOps](https://github.com/Azure/apiops-cli) to publish
+   [shared API artifacts](../apim-artifacts/) to both instances, with temporary
+   backend URL and named value overrides; prints the end-to-end command.
 
-Temporary rendered manifests and ARM parameter files are cleaned up. Partial
+Temporary rendered manifests and APIOps overrides are cleaned up. Partial
 publication fails explicitly rather than claiming success. Fix the underlying
 error, keep connection markers intact, then resume the selected environment:
 
@@ -188,6 +198,89 @@ When using azd installed inside WSL, run all related authentication, environment
 selection, and commands there. Windows azd uses Windows hooks. A manual Bash hook
 on Windows/WSL is an explicit alternative, not a reason to provision a second time.
 Do not assume Windows and Linux azd sessions point to the same subscription/environment.
+
+## Sync-Apim
+
+Publish API changes without provisioning infrastructure, approving connections,
+changing public access, or touching AKS. Uses the selected azd environment's
+provisioned outputs, including `BRAZIL_*`, `US_*`, and `FRONT_DOOR_*`.
+The original regional keys remain compatible even when actual locations differ.
+
+First run `azd env list` from the repository root, then
+`azd env select <existing-environment>`. If the list is `[]`, there is no local
+environment to sync: restore the provisioned environment configuration (for
+example, from the workstation used to deploy) or follow the
+[deployment setup](../README.md#1-prerequisites) for a new deployment.
+Do not create an empty environment just to bypass this check: sync requires
+the actual provisioned APIM, backend, and Front Door outputs. Environment loading
+fails without prompting and does not create an environment or provision Azure
+resources.
+
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -DryRun
+.\scripts\ps1\Sync-Apim.ps1
+```
+
+```bash
+bash scripts/bash/sync-apim.sh --dry-run
+bash scripts/bash/sync-apim.sh
+```
+
+Dry-run still reads live Azure configuration and requires Azure authentication
+and read permissions, but does not publish. Publishing also requires
+`Microsoft.ApiManagement/service/*` configuration permissions, such as API
+Management Service Contributor on each instance. Azure CLI login is supported by
+APIOps `DefaultAzureCredential`; CI uses the existing federated `azure/login`
+session, without a client secret.
+
+Before any publish, both targets must have public access `Disabled`, exactly one
+correlated approved Private Link connection, and matching Front Door origins.
+The same complete artifact tree is published to each instance in order.
+Temporary YAML-compatible JSON overrides set `regional-demo.serviceUrl`,
+`poc-front-door-id`, and `poc-region` from the environment, then are removed.
+Do not invoke the raw CLI on the placeholder artifacts without these overrides.
+No destructive deletion or incremental mode is enabled, so unrelated APIs remain
+untouched and removed files do not delete live resources.
+Publication pins ARM API `2024-05-01`, matching the original API template rather
+than the CLI's preview default. Caller environment variables are restored.
+
+If publication of either APIM fails, the command fails explicitly. There is no
+cross-instance transaction or automatic rollback. Fix the issue and rerun the
+command for **both** instances; the full artifact set is reapplied. Run
+[Test-EndToEnd](#test-endtoend) after Front Door propagation. Do not run competing
+sync, provisioning, failover, or manual operators.
+
+### Protected manual GitHub workflow
+
+[sync-apim.yml](../.github/workflows/sync-apim.yml) runs validation first, requires
+the protected `azure-deployment` environment with required reviewers, uses OIDC,
+and shares the deployment workflow's environment-name concurrency group.
+It defaults to dry-run. It does not depend on a runner-local azd environment.
+
+Configure existing `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and
+`AZURE_SUBSCRIPTION_ID` environment variables as for deployment. Additionally set
+the **GitHub environment variable** `APIM_SYNC_ENVIRONMENT_JSON` to the JSON output
+of `azd env get-values --output json` from the provisioned environment. Retain only:
+
+- `AZURE_ENV_NAME`, `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`, `FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_ID`,
+  `FRONT_DOOR_ORIGIN_GROUP_NAME`
+- For each of `BRAZIL` and `US`, the suffixes `RESOURCE_GROUP`, `APIM_NAME`,
+  `APIM_ID`, `AKS_NAME`, `BACKEND_IP`, `APIM_SUBNET`, and `LOCATION`
+
+Do not include credentials or unrelated environment values. This configuration
+is Azure metadata, must not be committed, and must be refreshed if infrastructure
+outputs change. The workflow rejects a different environment name/subscription.
+Dispatch **Sync both private APIMs** with the matching environment name and
+`dry_run: true`; review the plan, then dispatch with `dry_run: false`.
+
+The initial deployment workflow also installs the locked APIOps CLI before its
+postprovision hook. Bicep no longer manages API resources; do not restore a
+parallel API template as a second source of truth.
+
+References: [publish flags](https://github.com/Azure/apiops-cli/blob/main/docs/commands/publish.md),
+[artifact format](https://github.com/Azure/apiops-cli/blob/main/docs/reference/artifact-format.md),
+and [environment overrides](https://github.com/Azure/apiops-cli/blob/main/docs/guides/environment-overrides.md).
 
 ## Test-EndToEnd
 

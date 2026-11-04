@@ -74,17 +74,16 @@ foreach ($parameter in $parameters.parameters.Keys) {
         throw "Unknown azd parameter: $parameter"
     }
 }
-$gatewayJson = Invoke-CheckedCommand bicep @('build', (Join-Path $root 'infra\gateway.bicep'), '--stdout')
-$gateway = $gatewayJson -join "`n" | ConvertFrom-Json -AsHashtable
-$gatewayResources = @(Find-TemplateResources $gateway)
-$api = @($gatewayResources | Where-Object type -EQ 'Microsoft.ApiManagement/service/apis')
-if ($api.Count -ne 1 -or $api[0].properties.path -ne 'demo' -or
-    $api[0].properties.subscriptionRequired -ne $false -or
-    $api[0].properties.protocols[0] -ne 'https' -or
-    $api[0].properties.serviceUrl -notlike '*http://*') {
+$artifactRoot = Join-Path $root 'apim-artifacts\apis\regional-demo'
+$api = Get-Content (Join-Path $artifactRoot 'apiInformation.json') -Raw | ConvertFrom-Json
+if ($api.properties.path -ne 'demo' -or
+    $api.properties.subscriptionRequired -ne $false -or
+    $api.properties.protocols[0] -ne 'https' -or
+    $api.properties.serviceUrl -ne 'http://127.0.0.1') {
     throw 'Expected HTTPS gateway with explicitly private HTTP PoC backend.'
 }
-$operations = @($gatewayResources | Where-Object type -EQ 'Microsoft.ApiManagement/service/apis/operations')
+$operations = @(Get-ChildItem (Join-Path $artifactRoot 'operations') -Recurse -Filter operationInformation.json |
+    ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
 foreach ($path in @('/', '/health/ready')) {
     if (@($operations | Where-Object {
         $_.properties.method -eq 'GET' -and $_.properties.urlTemplate -eq $path
@@ -92,10 +91,10 @@ foreach ($path in @('/', '/health/ready')) {
         throw "Expected a GET operation for $path on the demo API."
     }
 }
-$policy = @($gatewayResources | Where-Object type -EQ 'Microsoft.ApiManagement/service/apis/policies')
-if ($policy.Count -ne 1 -or $policy[0].properties.value -notlike "*parameters('frontDoorId')*" -or
-    $policy[0].properties.value -notlike "*parameters('region')*") {
-    throw 'Gateway policy must substitute the actual Front Door ID and region.'
+[xml]$policy = Get-Content (Join-Path $artifactRoot 'policy.xml') -Raw
+if ($policy.policies.inbound.'check-header'.value -cne '{{poc-front-door-id}}' -or
+    @($policy.policies.outbound.'set-header' | Where-Object name -EQ 'X-Served-Region')[0].value -cne '{{poc-region}}') {
+    throw 'Gateway policy must use the regional APIOps named value overrides.'
 }
 if ($main.parameters.deploymentProfile.defaultValue -ne 'poc' -or
     $main.parameters.monitoringMode.defaultValue -ne 'Disabled' -or
@@ -151,8 +150,8 @@ foreach ($expected in @(
         $_.metric -eq $expected.Metric -and $_.threshold -eq $expected.Threshold -and $_.operator -eq $expected.Operator
     }).Count -ne 1) { throw "Missing or incorrect Front Door SLO threshold: $($expected.Metric)" }
 }
-if ($policy[0].properties.value -notlike '*context.RequestId.ToString()*' -or
-    $policy[0].properties.value -notlike '*X-Correlation-ID*') { throw 'Gateway request correlation is required.' }
+if ($policy.OuterXml -notlike '*context.RequestId.ToString()*' -or
+    $policy.OuterXml -notlike '*X-Correlation-ID*') { throw 'Gateway request correlation is required.' }
 foreach ($output in @('REGION1_LOCATION', 'REGION2_LOCATION', 'REGION1_APIM_ID', 'REGION2_APIM_ID')) {
     if (-not $main.outputs.Contains($output)) { throw "Missing neutral alias: $output" }
 }

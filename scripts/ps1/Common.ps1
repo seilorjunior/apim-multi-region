@@ -28,11 +28,31 @@ function Invoke-AzJson {
 }
 
 function Get-ProjectEnvironment {
-    $json = Invoke-CheckedCommand -Command azd -Arguments @('env', 'get-values', '--output', 'json')
+    $guidance = 'Cannot read the selected azd environment. Run azd env list from the repository root, then azd env select <existing-environment>. If none exist, restore the provisioned environment configuration or follow the README deployment setup. APIM sync requires provisioned outputs; creating an empty environment is not enough.'
+    try {
+        $listJson = Invoke-CheckedCommand -Command azd -Arguments @(
+            'env', 'list', '--output', 'json', '--cwd', $script:ProjectRoot, '--no-prompt'
+        )
+        $environments = @($listJson -join "`n" | ConvertFrom-Json -AsHashtable)
+        $selected = @($environments | Where-Object {
+            if ($env:AZURE_ENV_NAME) { $_.Name -ceq $env:AZURE_ENV_NAME } else { $_.IsDefault }
+        })
+        if ($selected.Count -ne 1 -or -not $selected[0].HasLocal -or
+            [string]::IsNullOrWhiteSpace($selected[0].Name)) {
+            throw [System.InvalidOperationException]::new('No selected local azd environment exists.')
+        }
+        $json = Invoke-CheckedCommand -Command azd -Arguments @(
+            'env', 'get-values', '--environment', $selected[0].Name,
+            '--output', 'json', '--cwd', $script:ProjectRoot, '--no-prompt'
+        )
+    } catch [System.InvalidOperationException] {
+        throw [System.InvalidOperationException]::new($guidance, $_.Exception)
+    }
     $values = $json -join "`n" | ConvertFrom-Json -AsHashtable
     if ($values -isnot [System.Collections.IDictionary]) {
         throw 'azd did not return an environment object. Initialize an environment first.'
     }
+    $null = Get-RequiredValue $values 'AZURE_ENV_NAME'
     return $values
 }
 

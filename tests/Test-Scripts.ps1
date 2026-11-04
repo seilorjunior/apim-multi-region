@@ -145,6 +145,43 @@ try {
         $script:ProjectSubscriptionId -notin $script:capturedArguments) {
         throw 'ARM commands must retain the explicit subscription.'
     }
+    function Invoke-CheckedCommand {
+        param([string]$Command, [string[]]$Arguments)
+        $script:capturedArguments = $Arguments
+        if ($script:environmentScenario -eq 'Missing') {
+            throw [System.InvalidOperationException]::new('azd failed with exit code 1.')
+        }
+        if ($Arguments[1] -eq 'list') {
+            if ($script:environmentScenario -eq 'Empty') { return '[]' }
+            if ($script:environmentScenario -eq 'Unselected') { return '[{"Name":"test","HasLocal":true,"IsDefault":false}]' }
+            return '[{"Name":"test","HasLocal":true,"IsDefault":true}]'
+        }
+        if ('--environment' -notin $Arguments -or 'test' -notin $Arguments) {
+            throw 'Environment values must be loaded with an explicit existing name.'
+        }
+        if ($script:environmentScenario -eq 'Invalid') { return '{"AZURE_ENV_NAME":""}' }
+        return '{"AZURE_ENV_NAME":"test"}'
+    }
+    foreach ($case in @('Selected', 'Missing', 'Empty', 'Unselected', 'Invalid')) {
+        $script:environmentScenario = $case
+        $caught = $null
+        try { $environment = Get-ProjectEnvironment } catch { $caught = $_ }
+        if ('--no-prompt' -notin $script:capturedArguments -or
+            $script:ProjectRoot -notin $script:capturedArguments) {
+            throw 'Environment loading must use the repository root without prompting.'
+        }
+        if ($case -eq 'Selected') {
+            if ($caught) { throw $caught }
+            if ($environment.AZURE_ENV_NAME -ne 'test') { throw 'Selected environment was not loaded.' }
+        } elseif ($case -in @('Missing', 'Empty', 'Unselected')) {
+            if (-not $caught -or $caught.Exception.Message -notlike '*azd env select*' -or
+                -not $caught.Exception.InnerException) {
+                throw 'Missing environment must include recovery guidance and preserve the original error.'
+            }
+        } elseif (-not $caught -or $caught.Exception.Message -notlike '*Missing AZURE_ENV_NAME*') {
+            throw 'An empty environment name must fail before Azure access.'
+        }
+    }
 } finally {
     Set-Item -Path Function:\Invoke-CheckedCommand -Value $originalCommand
     $script:ProjectSubscriptionId = $originalSubscription

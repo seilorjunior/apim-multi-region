@@ -12,10 +12,12 @@ try {
             throw 'Tool versions do not match scripts\toolchain.json.'
         }
         Invoke-CheckedCommand actionlint @('-shellcheck=', '-pyflakes=',
-            '.\.github\workflows\validate.yml', '.\.github\workflows\release-image.yml', '.\.github\workflows\deploy.yml')
+            '.\.github\workflows\validate.yml', '.\.github\workflows\release-image.yml', '.\.github\workflows\deploy.yml',
+            '.\.github\workflows\sync-apim.yml')
     }
     Invoke-CheckedCommand python @('-B', '-m', 'unittest', 'discover', '-s', '.\tests', '-p', 'test_*.py', '-v')
-    foreach ($test in @('Test-Scripts.ps1', 'Test-Bootstrap.ps1', 'Test-ApiSample.ps1', 'Test-Failover.ps1', 'Test-Infrastructure.ps1')) {
+    Invoke-CheckedCommand node @('--test', (Join-Path $script:ProjectRoot 'tests\apiops.test.mjs'))
+    foreach ($test in @('Test-Scripts.ps1', 'Test-Bootstrap.ps1', 'Test-ApiOps.ps1', 'Test-ApiSample.ps1', 'Test-Failover.ps1', 'Test-Infrastructure.ps1')) {
         Invoke-CheckedCommand pwsh @('-NoProfile', '-File', (Join-Path $script:ProjectRoot "tests\$test"))
     }
     Write-Host 'All local validation suites passed. No Azure resource was changed.'

@@ -19,8 +19,16 @@ require_tools() {
     for name in "$@"; do command -v "$name" >/dev/null || die "Required command not found: $name"; done
 }
 load_environment() {
-    ENV_JSON="$(cd -- "$PROJECT_ROOT" && azd env get-values --output json)" || die 'Cannot read the selected azd environment.'
+    local environments selected guidance
+    guidance='Cannot read the selected azd environment. Run azd env list from the repository root, then azd env select <existing-environment>. If none exist, restore the provisioned environment configuration or follow the README deployment setup. APIM sync requires provisioned outputs; creating an empty environment is not enough.'
+    environments="$(cd -- "$PROJECT_ROOT" && azd env list --output json --no-prompt)" || die "$guidance"
+    selected="$(jq -er --arg name "${AZURE_ENV_NAME:-}" '
+        [.[] | select(if $name != "" then .Name == $name else .IsDefault end) | select(.HasLocal)] |
+        select(length == 1) | .[0].Name | select(type == "string" and test("\\S"))' <<<"$environments")" || die "$guidance"
+    ENV_JSON="$(cd -- "$PROJECT_ROOT" && azd env get-values --environment "$selected" --output json --no-prompt)" ||
+        die "$guidance"
     jq -e 'type == "object"' <<<"$ENV_JSON" >/dev/null || die 'azd did not return an environment object.'
+    required AZURE_ENV_NAME >/dev/null
 }
 required() {
     jq -er --arg name "$1" '.[$name] | select(type == "string" and test("\\S"))' <<<"$ENV_JSON" ||

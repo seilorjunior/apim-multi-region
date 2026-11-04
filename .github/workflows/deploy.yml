@@ -43,6 +43,14 @@ jobs:
       - name: Install pinned PowerShell and Bicep
         shell: pwsh
         run: .\scripts\ps1\Install-CiTools.ps1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install locked APIOps CLI
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'APIOps dependency installation failed.' }
       - uses: Azure/setup-azd@0b7e3a35ab00f2eee7080c845eb39c3f0ebfa553 # v2
         with:
           version: ${{ steps.versions.outputs.azd }}

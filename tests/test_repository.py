@@ -82,7 +82,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertIn("pull_request", validate["on"])
         self.assertIn("workflow_call", validate["on"])
         self.assertIn("native-bash", validate["jobs"])
-        for name, environment in (("deploy", "azure-deployment"), ("release-image", "image-release")):
+        for name, environment in (("deploy", "azure-deployment"), ("release-image", "image-release"),
+                                  ("sync-apim", "azure-deployment")):
             workflow = workflows[name]
             self.assertEqual(list(workflow["on"]), ["workflow_dispatch"])
             jobs = workflow["jobs"]
@@ -110,7 +111,7 @@ class RepositoryTests(unittest.TestCase):
         dependabot = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
         self.assertEqual(dependabot["version"], 2)
         updates = {item["package-ecosystem"]: item for item in dependabot["updates"]}
-        self.assertEqual(set(updates), {"github-actions", "pip"})
+        self.assertEqual(set(updates), {"github-actions", "pip", "npm"})
         for update in updates.values():
             self.assertEqual(update["directory"], "/")
             self.assertEqual(update["schedule"]["interval"], "weekly")
@@ -139,11 +140,12 @@ class RepositoryTests(unittest.TestCase):
                 verify_uses(yaml.load(document.read_text(), Loader=yaml.BaseLoader))
 
     def test_deployments_are_serialized_without_cancellation(self):
-        workflow = yaml.load((ROOT / ".github" / "workflows" / "deploy.yml").read_text(),
-                             Loader=yaml.BaseLoader)
-        self.assertEqual(workflow["concurrency"]["group"],
-                         "azure-provision-${{ inputs.environment_name }}")
-        self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
+        for name in ("deploy", "sync-apim"):
+            workflow = yaml.load((ROOT / ".github" / "workflows" / f"{name}.yml").read_text(),
+                                 Loader=yaml.BaseLoader)
+            self.assertEqual(workflow["concurrency"]["group"],
+                             "azure-provision-${{ inputs.environment_name }}")
+            self.assertEqual(workflow["concurrency"]["cancel-in-progress"], "false")
 
     def test_pr_container_is_unprivileged_and_not_published(self):
         workflow = yaml.load((ROOT / ".github" / "workflows" / "validate.yml").read_text(),

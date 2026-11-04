@@ -287,7 +287,7 @@ Esta ordem preserva o requisito do [bootstrap implementado com azd](../../README
 4. Aprovar as conexões corretas e verificar sua correlação com as origens esperadas.
 5. Desabilitar e verificar o acesso público em **ambos** os gateways APIM; interromper a publicação se qualquer verificação falhar.
 6. Implantar e validar as aplicações pelos ingressos internos.
-7. Publicar APIs e políticas por pipeline e testar o backend privado de cada instância.
+7. Publicar o mesmo conjunto de [artefatos APIOps](../../apim-artifacts/) nos dois APIM, com overrides regionais de backend e headers, e testar o backend privado de cada instância. O Bicep gerencia somente a infraestrutura; a [sincronização](../../scripts/README.md#sync-apim) valida ambos os gateways privados antes da publicação.
 8. Aguardar a convergência da configuração e das probes ponta a ponta; validar chamadas pelo Front Door e a negação de acesso direto aos dois APIM.
 9. Executar testes de falha, capacidade e recuperação de dados.
 10. Medir RTO/RPO e registrar os procedimentos de operação e failback.

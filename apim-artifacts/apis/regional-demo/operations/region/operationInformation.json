@@ -1,0 +1,8 @@
+{
+  "properties": {
+    "displayName": "Serving region",
+    "method": "GET",
+    "urlTemplate": "/",
+    "responses": [{"statusCode": 200}]
+  }
+}

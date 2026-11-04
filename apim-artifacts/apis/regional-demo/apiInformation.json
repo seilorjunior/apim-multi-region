@@ -1,0 +1,10 @@
+{
+  "properties": {
+    "displayName": "Private regional PoC",
+    "apiRevision": "1",
+    "path": "demo",
+    "protocols": ["https"],
+    "serviceUrl": "http://127.0.0.1",
+    "subscriptionRequired": false
+  }
+}

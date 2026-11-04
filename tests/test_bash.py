@@ -1,6 +1,6 @@
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shlex
 import shutil
 import subprocess
@@ -72,7 +72,7 @@ class BashTests(unittest.TestCase):
             with self.subTest(script=path.name):
                 self.assertNotIn(b"\r", path.read_bytes(), "Bash scripts require LF line endings.")
                 self.run_bash(f"bash -n scripts/bash/{path.name}")
-                if path.stem not in ("common", "bootstrap", "failover"):
+                if path.stem not in ("common", "bootstrap", "failover", "apiops"):
                     result = self.run_bash(f"bash scripts/bash/{path.name} --help")
                     self.assertIn("Usage:", result.stdout)
 
@@ -126,6 +126,38 @@ curl() {
                           "--region region1 --allow-disruption --yes --timeout-seconds 0", "--unknown"):
             result = self.run_bash(guard + "bash scripts/bash/test-failover.sh " + arguments, success=False)
             self.assertNotIn("UNEXPECTED_AZURE_ACCESS", result.stderr)
+
+    def test_environment_loading_errors(self):
+        for scenario in ("Selected", "Missing", "Empty", "Unselected", "Invalid"):
+            script = self.common(f"SCENARIO={scenario}\n" + r'''
+azd() {
+    [[ "$*" == *--no-prompt* ]] || return 99
+    if [[ "$1 $2" == 'env list' ]]; then
+        case "$SCENARIO" in
+            Empty) printf '[]' ;;
+            Unselected) printf '[{"Name":"test","HasLocal":true,"IsDefault":false}]' ;;
+            *) printf '[{"Name":"test","HasLocal":true,"IsDefault":true}]' ;;
+        esac
+        return
+    fi
+    [[ "$1 $2" == 'env get-values' && "$*" == *'--environment test'* ]] || return 99
+    case "$SCENARIO" in
+        Missing) printf "environment name '' is invalid\n" >&2; return 1 ;;
+        Invalid) printf '{"AZURE_ENV_NAME":""}' ;;
+        Selected) printf '{"AZURE_ENV_NAME":"test"}' ;;
+    esac
+}
+load_environment
+required AZURE_ENV_NAME
+''')
+            result = self.run_bash(script, success=scenario == "Selected")
+            if scenario == "Selected":
+                self.assertEqual(result.stdout.strip(), "test")
+            elif scenario in ("Missing", "Empty", "Unselected"):
+                self.assertIn("azd env select <existing-environment>", result.stderr)
+                self.assertIn("creating an empty environment is not enough", result.stderr)
+            else:
+                self.assertIn("Missing AZURE_ENV_NAME", result.stderr)
 
     def test_render_and_input_validation(self):
         image = "ghcr.io/example/demo@sha256:" + "a" * 64
@@ -240,7 +272,8 @@ trap 'rm -f -- "$MOCK_DIR/state"; rmdir -- "$MOCK_DIR"' EXIT
 export MOCK_STATE="$MOCK_DIR/state"
 : > "$MOCK_STATE"
 azd() {
-    if [[ "$1 $2" == 'env get-values' ]]; then printf '%s\n' "$MOCK_VALUES"
+    if [[ "$1 $2" == 'env list' ]]; then printf '[{"Name":"test","HasLocal":true,"IsDefault":true}]'
+    elif [[ "$1 $2" == 'env get-values' ]]; then printf '%s\n' "$MOCK_VALUES"
     elif [[ "$1 $2" == 'env set' ]]; then printf '%s=%s\n' "$3" "$4" >> "$MOCK_STATE"
     elif [[ "$1 $2" == 'env new' ]]; then printf 'environment-created\n' >> "$MOCK_STATE"
     else return 91; fi
@@ -289,12 +322,94 @@ exit "$code"
                     self.assertNotIn("APIM_PUBLIC_ACCESS_", result.stdout)
                     self.assertIn("Register Microsoft.ApiManagement", result.stderr)
 
+    def test_apiops_sync(self):
+        mock = r'''
+source scripts/bash/apiops.sh
+az_json() {
+    local key=br prefix=BRAZIL status=Approved marker access=Disabled
+    case "$1 $2" in
+        'apim show')
+            [[ "$4" != apim-US ]] || key=us
+            printf 'CHECK:%s\n' "$key" >&2
+            if [[ "$CASE" == PublicUS && "$key" == us ]]; then access=Enabled; fi
+            jq -cn --arg access "$access" '{publicNetworkAccess:$access}' ;;
+        'network private-endpoint-connection')
+            [[ "${@: -1}" != */US ]] || key=us
+            marker="azd:test:$key:profile"
+            if [[ "$CASE" == PendingUS && "$key" == us ]]; then status=Pending; fi
+            if [[ "$CASE" == WrongMarker ]]; then marker=other; fi
+            jq -cn --arg status "$status" --arg marker "$marker" --arg case "$CASE" '
+                [{properties:{privateLinkServiceConnectionState:{status:$status,description:$marker}}}] |
+                if $case == "Ambiguous" then . + . else . end' ;;
+        'resource show')
+            [[ "$4" != */us ]] || { key=us; prefix=US; }
+            if [[ "$CASE" == WrongOrigin ]]; then prefix=wrong; fi
+            jq -cn --arg id "/apim/$prefix" --arg marker "azd:test:$key:profile" '
+                {properties:{sharedPrivateLinkResource:{privateLink:{id:$id},groupId:"Gateway",requestMessage:$marker}}}' ;;
+        *) die "Unexpected Azure mutation or command: $*" ;;
+    esac
+}
+node() {
+    local cli="$1" command="$2" subscription group name source config dry=false
+    [[ "$command" == publish && -z "${COMMIT_ID:-}" ]] || die 'Expected full APIOps publish'
+    [[ "$AZURE_API_VERSION" == 2024-05-01 ]] || die 'Expected stable APIM management API'
+    shift 2
+    while (( $# )); do
+        case "$1" in
+            --subscription-id) subscription="$2"; shift 2 ;;
+            --resource-group) group="$2"; shift 2 ;;
+            --service-name) name="$2"; shift 2 ;;
+            --source) source="$2"; shift 2 ;;
+            --overrides) config="$2"; shift 2 ;;
+            --dry-run) dry=true; shift ;;
+            *) die "Unexpected publish option: $1" ;;
+        esac
+    done
+    printf 'PUBLISH:%s\n' "$name" >&2
+    jq -cn --arg subscription "$subscription" --arg group "$group" --arg name "$name" --arg source "$source" \
+        --arg path "$config" --argjson dry "$dry" --slurpfile config "$config" \
+        '{subscription:$subscription,group:$group,name:$name,source:$source,path:$path,dry:$dry,config:$config[0]}'
+    [[ "$CASE" != FailSecond || "$name" != apim-US ]] || return 1
+}
+COMMIT_ID=must-not-limit-sync
+AZURE_API_VERSION=must-be-restored
+export COMMIT_ID AZURE_API_VERSION
+sync_apim "$DRY_RUN"
+[[ "$COMMIT_ID" == must-not-limit-sync ]] || die 'Parent environment modified'
+[[ "$AZURE_API_VERSION" == must-be-restored ]] || die 'Parent API version modified'
+'''
+        values = {**VALUES, "US_BACKEND_IP": "10.20.3.250"}
+        for case in ("Success", "DryRun", "PublicUS", "PendingUS", "WrongMarker",
+                     "Ambiguous", "WrongOrigin", "FailSecond", "Success"):
+            with self.subTest(case=case):
+                script = self.common("ENV_JSON=" + shlex.quote(json.dumps(values)) +
+                                     f"\nCASE={case}\nDRY_RUN=" + ("true" if case == "DryRun" else "false") + "\n")
+                result = self.run_bash(script + mock, success=case in ("Success", "DryRun"))
+                records = json_documents(result.stdout)
+                if case not in ("Success", "DryRun", "FailSecond"):
+                    self.assertEqual(records, [])
+                    continue
+                self.assertEqual([record["name"] for record in records], ["apim-BRAZIL", "apim-US"])
+                self.assertLess(result.stderr.index("CHECK:us"), result.stderr.index("PUBLISH:"))
+                for record, prefix in zip(records, ("BRAZIL", "US")):
+                    self.assertEqual(record["subscription"], VALUES["AZURE_SUBSCRIPTION_ID"])
+                    self.assertEqual(record["group"], prefix)
+                    self.assertTrue(record["source"].endswith("/apim-artifacts"))
+                    self.assertEqual(record["dry"], case == "DryRun")
+                    self.assertEqual(record["config"]["apis"][0]["properties"]["serviceUrl"],
+                                     "http://" + values[f"{prefix}_BACKEND_IP"])
+                    named = {item["name"]: item["properties"]["value"]
+                             for item in record["config"]["namedValues"]}
+                    self.assertEqual(named, {"poc-region": values[f"{prefix}_LOCATION"],
+                                             "poc-front-door-id": "fdid"})
+                    self.run_bash("test ! -d " + shlex.quote(str(PurePosixPath(record["path"]).parent)))
+
     def test_bootstrap_state_machine(self):
         mock = r'''
 source scripts/bash/bootstrap.sh
 cleanup_bootstrap() {
     local code=$?
-    rm -f -- "$BOOTSTRAP_TEMP_DIR/demo.yaml" "$BOOTSTRAP_TEMP_DIR/gateway.json" "$BOOTSTRAP_TEMP_DIR/gateway.parameters.json"
+    rm -f -- "$BOOTSTRAP_TEMP_DIR/demo.yaml"
     rmdir "$BOOTSTRAP_TEMP_DIR"
     (exit "$code")
 }
@@ -306,7 +421,12 @@ event() {
     mv "$MOCK_DIR/next" "$MOCK_DIR/state"
 }
 set_value() { :; }
-bicep() { check_private; event compile; }
+sync_apim() {
+    check_private
+    event api
+    [[ "$CASE" != PublishFailure ]] || die 'Simulated publication failure.'
+    event api
+}
 aks_checked() { check_private; event workload; }
 az_json() {
     local key=br status=Approved marker connection id
@@ -340,10 +460,6 @@ az_json() {
             mv "$MOCK_DIR/next" "$MOCK_DIR/state"
         fi
         event disable; printf '{}\n'
-    elif [[ "$1 $2" == "deployment group" ]]; then
-        check_private; event api
-        [[ "$CASE" != PublishFailure ]] || die 'Simulated publication failure.'
-        printf '{}\n'
     else
         die "Unexpected mock command: $*"
     fi
