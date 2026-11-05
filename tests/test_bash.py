@@ -1,6 +1,6 @@
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shlex
 import shutil
 import subprocess
@@ -325,84 +325,26 @@ exit "$code"
     def test_apiops_sync(self):
         mock = r'''
 source scripts/bash/apiops.sh
-az_json() {
-    local key=br prefix=BRAZIL status=Approved marker access=Disabled
-    case "$1 $2" in
-        'apim show')
-            [[ "$4" != apim-US ]] || key=us
-            printf 'CHECK:%s\n' "$key" >&2
-            if [[ "$CASE" == PublicUS && "$key" == us ]]; then access=Enabled; fi
-            jq -cn --arg access "$access" '{publicNetworkAccess:$access}' ;;
-        'network private-endpoint-connection')
-            [[ "${@: -1}" != */US ]] || key=us
-            marker="azd:test:$key:profile"
-            if [[ "$CASE" == PendingUS && "$key" == us ]]; then status=Pending; fi
-            if [[ "$CASE" == WrongMarker ]]; then marker=other; fi
-            jq -cn --arg status "$status" --arg marker "$marker" --arg case "$CASE" '
-                [{properties:{privateLinkServiceConnectionState:{status:$status,description:$marker}}}] |
-                if $case == "Ambiguous" then . + . else . end' ;;
-        'resource show')
-            [[ "$4" != */us ]] || { key=us; prefix=US; }
-            if [[ "$CASE" == WrongOrigin ]]; then prefix=wrong; fi
-            jq -cn --arg id "/apim/$prefix" --arg marker "azd:test:$key:profile" '
-                {properties:{sharedPrivateLinkResource:{privateLink:{id:$id},groupId:"Gateway",requestMessage:$marker}}}' ;;
-        *) die "Unexpected Azure mutation or command: $*" ;;
-    esac
-}
 node() {
-    local cli="$1" command="$2" subscription group name source config dry=false
-    [[ "$command" == publish && -z "${COMMIT_ID:-}" ]] || die 'Expected full APIOps publish'
-    [[ "$AZURE_API_VERSION" == 2024-05-01 ]] || die 'Expected stable APIM management API'
-    shift 2
-    while (( $# )); do
-        case "$1" in
-            --subscription-id) subscription="$2"; shift 2 ;;
-            --resource-group) group="$2"; shift 2 ;;
-            --service-name) name="$2"; shift 2 ;;
-            --source) source="$2"; shift 2 ;;
-            --overrides) config="$2"; shift 2 ;;
-            --dry-run) dry=true; shift ;;
-            *) die "Unexpected publish option: $1" ;;
-        esac
-    done
-    printf 'PUBLISH:%s\n' "$name" >&2
-    jq -cn --arg subscription "$subscription" --arg group "$group" --arg name "$name" --arg source "$source" \
-        --arg path "$config" --argjson dry "$dry" --slurpfile config "$config" \
-        '{subscription:$subscription,group:$group,name:$name,source:$source,path:$path,dry:$dry,config:$config[0]}'
-    [[ "$CASE" != FailSecond || "$name" != apim-US ]] || return 1
+    [[ "$1" == */scripts/apiops.mjs && "$2 $3 $4" == '--config - --action' ]] || die 'Expected shared lifecycle engine'
+    jq -c --arg action "$5" '{action:$action,config:.}'
+    [[ "$CASE" != Failure ]] || return 3
 }
 COMMIT_ID=must-not-limit-sync
 AZURE_API_VERSION=must-be-restored
 export COMMIT_ID AZURE_API_VERSION
-sync_apim "$DRY_RUN"
+sync_apim "$DRY_RUN" --plan reviewed-plan.json
 [[ "$COMMIT_ID" == must-not-limit-sync ]] || die 'Parent environment modified'
 [[ "$AZURE_API_VERSION" == must-be-restored ]] || die 'Parent API version modified'
 '''
-        values = {**VALUES, "US_BACKEND_IP": "10.20.3.250"}
-        for case in ("Success", "DryRun", "PublicUS", "PendingUS", "WrongMarker",
-                     "Ambiguous", "WrongOrigin", "FailSecond", "Success"):
+        for case in ("Success", "DryRun", "Failure"):
             with self.subTest(case=case):
-                script = self.common("ENV_JSON=" + shlex.quote(json.dumps(values)) +
-                                     f"\nCASE={case}\nDRY_RUN=" + ("true" if case == "DryRun" else "false") + "\n")
-                result = self.run_bash(script + mock, success=case in ("Success", "DryRun"))
+                script = self.common(f"CASE={case}\nDRY_RUN=" + ("true" if case == "DryRun" else "false") + "\n")
+                result = self.run_bash(script + mock, success=case != "Failure")
                 records = json_documents(result.stdout)
-                if case not in ("Success", "DryRun", "FailSecond"):
-                    self.assertEqual(records, [])
-                    continue
-                self.assertEqual([record["name"] for record in records], ["apim-BRAZIL", "apim-US"])
-                self.assertLess(result.stderr.index("CHECK:us"), result.stderr.index("PUBLISH:"))
-                for record, prefix in zip(records, ("BRAZIL", "US")):
-                    self.assertEqual(record["subscription"], VALUES["AZURE_SUBSCRIPTION_ID"])
-                    self.assertEqual(record["group"], prefix)
-                    self.assertTrue(record["source"].endswith("/apim-artifacts"))
-                    self.assertEqual(record["dry"], case == "DryRun")
-                    self.assertEqual(record["config"]["apis"][0]["properties"]["serviceUrl"],
-                                     "http://" + values[f"{prefix}_BACKEND_IP"])
-                    named = {item["name"]: item["properties"]["value"]
-                             for item in record["config"]["namedValues"]}
-                    self.assertEqual(named, {"poc-region": values[f"{prefix}_LOCATION"],
-                                             "poc-front-door-id": "fdid"})
-                    self.run_bash("test ! -d " + shlex.quote(str(PurePosixPath(record["path"]).parent)))
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["config"], VALUES)
+                self.assertEqual(records[0]["action"], "plan" if case == "DryRun" else "publish")
 
     def test_bootstrap_state_machine(self):
         mock = r'''

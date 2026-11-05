@@ -88,13 +88,23 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(list(workflow["on"]), ["workflow_dispatch"])
             jobs = workflow["jobs"]
             job = next(job for job in jobs.values() if job.get("environment") == environment)
-            self.assertEqual(job["needs"], "validate")
+            self.assertEqual(job["needs"], ["validate", "preview"] if name == "sync-apim" else "validate")
             self.assertIn("required_reviewers", job["steps"][1]["run"])
         release_steps = workflows["release-image"]["jobs"]["image"]["steps"]
         scan_index = next(i for i, step in enumerate(release_steps) if step.get("id") == "image")
         push_index = next(i for i, step in enumerate(release_steps) if "docker push" in step.get("run", ""))
         self.assertLess(scan_index, push_index)
         self.assertIn("--severity HIGH,CRITICAL", release_steps[scan_index]["run"])
+        sync = workflows["sync-apim"]
+        self.assertEqual(sync["jobs"]["preview"]["environment"], "azure-preview")
+        self.assertEqual(sync["jobs"]["preview"]["needs"], "validate")
+        self.assertEqual(sync["jobs"]["publish"]["if"], "${{ !inputs.dry_run }}")
+        for job in ("preview", "publish"):
+            steps = sync["jobs"][job]["steps"]
+            self.assertEqual(steps[0]["with"]["ref"], "${{ github.sha }}")
+            self.assertEqual(steps[0]["with"]["fetch-depth"], "0")
+            self.assertIn("-PlanPath", str(steps))
+            self.assertTrue(any("actions/upload-artifact@" in step.get("uses", "") and step.get("if") == "always()" for step in steps))
 
     def test_toolchain_and_container_contract(self):
         versions = json.loads((ROOT / "scripts" / "toolchain.json").read_text())

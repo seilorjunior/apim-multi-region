@@ -3,13 +3,19 @@ on:
   workflow_dispatch:
     inputs:
       environment_name:
-        description: Existing provisioned azd environment name
+        description: Existing provisioned environment name
         required: true
         default: poc-apim-private
       dry_run:
-        description: Preview without publishing
+        description: Preview only (disable to request protected publication after preview)
         type: boolean
         default: true
+      revision:
+        description: Optional full 40-character artifact commit SHA for rollback
+        type: string
+      deletion_manifest:
+        description: Optional repository-relative reviewed operation deletion manifest
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -18,23 +24,19 @@ concurrency:
 jobs:
   validate:
     uses: ./.github/workflows/validate.yml
-  sync:
+  preview:
     needs: validate
     runs-on: windows-2025
-    environment: azure-deployment
+    environment: azure-preview
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Require protected environment
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          $protected = gh api "repos/$env:GH_REPO/environments/azure-deployment" --jq 'any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length) > 0)'
-          if ($LASTEXITCODE -ne 0 -or $protected -ne 'true') { throw 'Configure required reviewers on azure-deployment first.' }
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
@@ -48,20 +50,111 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Verify privacy and sync both instances
+      - name: Preview both instances and record immutable receipt
         shell: pwsh
         env:
           APIM_SYNC_ENVIRONMENT_JSON: ${{ vars.APIM_SYNC_ENVIRONMENT_JSON }}
           EXPECTED_ENVIRONMENT: ${{ inputs.environment_name }}
           EXPECTED_SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          ARTIFACT_REVISION: ${{ inputs.revision || github.sha }}
+          DELETION_MANIFEST: ${{ inputs.deletion_manifest }}
         run: |
           . .\scripts\ps1\Common.ps1
           . .\scripts\ps1\ApiOps.ps1
           $values = $env:APIM_SYNC_ENVIRONMENT_JSON | ConvertFrom-Json -AsHashtable
-          if ($values -isnot [System.Collections.IDictionary]) { throw 'Configure APIM_SYNC_ENVIRONMENT_JSON from the provisioned azd environment.' }
           if ((Get-RequiredValue $values 'AZURE_ENV_NAME') -cne $env:EXPECTED_ENVIRONMENT -or
               (Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID') -ine $env:EXPECTED_SUBSCRIPTION) {
-            throw 'APIM sync configuration does not match the requested environment/subscription.'
+            throw 'APIM configuration does not match requested environment/subscription.'
           }
-          Invoke-ApimSync -Values $values -DryRun:($env:DRY_RUN -eq 'true')
+          if ($env:DELETION_MANIFEST) {
+            if ($env:DELETION_MANIFEST -cnotmatch '^apim-deletions/[a-zA-Z0-9_.-]+\.json$') { throw 'Use a tracked apim-deletions/<name>.json manifest.' }
+            Invoke-CheckedCommand git @('ls-files', '--error-unmatch', '--', $env:DELETION_MANIFEST) | Out-Null
+          }
+          Invoke-ApimSync -Values $values -DryRun -Revision $env:ARTIFACT_REVISION `
+            -PlanPath .\TestResults\apiops-plan.json -ReportPath .\TestResults\preview-report.json `
+            -DeletionManifest $env:DELETION_MANIFEST
+          $plan = Get-Content .\TestResults\apiops-plan.json -Raw | ConvertFrom-Json
+          "## APIOps preview`nCommit: $($plan.commit)`nArtifact hash: $($plan.artifactHash)`nConfiguration hash: $($plan.configurationHash)`n" >> $env:GITHUB_STEP_SUMMARY
+          foreach ($region in $plan.regions) {
+            "### $($region.target)`n" >> $env:GITHUB_STEP_SUMMARY
+            $region.comparison | Select-Object path,status | ConvertTo-Csv -NoTypeInformation >> $env:GITHUB_STEP_SUMMARY
+          }
+          "Review the preview artifact before approving the publish job. Plans expire after 24 hours." >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: apiops-preview-${{ github.run_id }}
+          path: |
+            TestResults/apiops-plan.json
+            TestResults/preview-report.json
+          if-no-files-found: warn
+          retention-days: 14
+  publish:
+    needs: [validate, preview]
+    if: ${{ !inputs.dry_run }}
+    runs-on: windows-2025
+    environment: azure-deployment
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Require protected environment
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $protected = gh api "repos/$env:GH_REPO/environments/azure-deployment" --jq 'any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length) > 0)'
+          if ($LASTEXITCODE -ne 0 -or $protected -ne 'true') { throw 'Configure required reviewers on azure-deployment first.' }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: apiops-preview-${{ github.run_id }}
+          path: TestResults
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install locked APIOps CLI
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'APIOps dependency installation failed.' }
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Publish approved snapshot and verify runtime
+        shell: pwsh
+        env:
+          APIM_SYNC_ENVIRONMENT_JSON: ${{ vars.APIM_SYNC_ENVIRONMENT_JSON }}
+          EXPECTED_ENVIRONMENT: ${{ inputs.environment_name }}
+          EXPECTED_SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ARTIFACT_REVISION: ${{ inputs.revision || github.sha }}
+          DELETION_MANIFEST: ${{ inputs.deletion_manifest }}
+        run: |
+          . .\scripts\ps1\Common.ps1
+          . .\scripts\ps1\ApiOps.ps1
+          $values = $env:APIM_SYNC_ENVIRONMENT_JSON | ConvertFrom-Json -AsHashtable
+          if ((Get-RequiredValue $values 'AZURE_ENV_NAME') -cne $env:EXPECTED_ENVIRONMENT -or
+              (Get-RequiredValue $values 'AZURE_SUBSCRIPTION_ID') -ine $env:EXPECTED_SUBSCRIPTION) {
+            throw 'APIM configuration does not match requested environment/subscription.'
+          }
+          if ($env:DELETION_MANIFEST) {
+            if ($env:DELETION_MANIFEST -cnotmatch '^apim-deletions/[a-zA-Z0-9_.-]+\.json$') { throw 'Use a tracked apim-deletions/<name>.json manifest.' }
+            Invoke-CheckedCommand git @('ls-files', '--error-unmatch', '--', $env:DELETION_MANIFEST) | Out-Null
+          }
+          Invoke-ApimSync -Values $values -Revision $env:ARTIFACT_REVISION `
+            -PlanPath .\TestResults\apiops-plan.json -ReportPath .\TestResults\publish-report.json `
+            -DeletionManifest $env:DELETION_MANIFEST -AllowDelete:([bool]$env:DELETION_MANIFEST)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: apiops-publication-${{ github.run_id }}
+          path: TestResults/publish-report.json
+          if-no-files-found: warn
+          retention-days: 30

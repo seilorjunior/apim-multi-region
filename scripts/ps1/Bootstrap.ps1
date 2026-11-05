@@ -91,5 +91,5 @@ try {
 }
 Write-Host "Demo published at $(Get-RequiredValue $values 'API_URL')"
 Write-Host "Health endpoint: $(Get-RequiredValue $values 'API_HEALTH_URL')"
-Write-Host 'Allow Front Door health probes/configuration to propagate, then run scripts\ps1\Test-EndToEnd.ps1.'
+Write-Host 'APIOps configuration and non-disruptive runtime verification passed. For the full routing test, run scripts\ps1\Test-EndToEnd.ps1.'
 }

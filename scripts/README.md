@@ -27,6 +27,7 @@ Do not run both shell versions of a mutating operation concurrently.
 ```text
 scripts/
   README.md
+  apiops.mjs              Shared Node APIOps lifecycle
   toolchain.json
   ps1/                    PowerShell entry points and libraries
   bash/                   Native Bash entry points and libraries
@@ -45,7 +46,7 @@ scripts/
 | [Install-CiTools.ps1](./ps1/Install-CiTools.ps1) | [install-ci-tools.sh](./bash/install-ci-tools.sh) | Download tools on disposable CI runners; no Azure access. Not a workstation installer. |
 | [Common.ps1](./ps1/Common.ps1) | [common.sh](./bash/common.sh) | Shared environment, validation, rendering, Azure/AKS, and HTTP helpers. **Library, not an entry point.** |
 | [Bootstrap.ps1](./ps1/Bootstrap.ps1) | [bootstrap.sh](./bash/bootstrap.sh) | Private Link correlation/approval and privacy-gated publication. **Library, called by postprovision.** |
-| [ApiOps.ps1](./ps1/ApiOps.ps1) | [apiops.sh](./bash/apiops.sh) | Two-target privacy verification, regional overrides, and APIOps publication. **Library, not an entry point.** |
+| [ApiOps.ps1](./ps1/ApiOps.ps1) | [apiops.sh](./bash/apiops.sh) | Shell adapters to the [shared lifecycle engine](./apiops.mjs). **Library, not an entry point.** |
 | [Failover.ps1](./ps1/Failover.ps1) | [failover.sh](./bash/failover.sh) | Measurement, report, and recovery logic. **Library, called by the guarded failover entry point.** |
 
 Old root-level PowerShell paths have moved. Update external automation from
@@ -163,10 +164,10 @@ Through the Bootstrap library it:
 4. Disables and verifies public access on **both** APIM gateways before publishing.
 5. Renders the shared Kubernetes template and installs it using AKS Run Command.
 6. Uses [APIOps](https://github.com/Azure/apiops-cli) to publish
-   [shared API artifacts](../apim-artifacts/) to both instances, with temporary
-   backend URL and named value overrides; prints the end-to-end command.
+   [shared API artifacts](../apim-artifacts/) to both instances with regional
+   overrides, verifies the published configuration and runtime, and saves evidence.
 
-Temporary rendered manifests and APIOps overrides are cleaned up. Partial
+Temporary rendered manifests and artifact snapshots are cleaned up. Partial
 publication fails explicitly rather than claiming success. Fix the underlying
 error, keep connection markers intact, then resume the selected environment:
 
@@ -201,10 +202,18 @@ Do not assume Windows and Linux azd sessions point to the same subscription/envi
 
 ## Sync-Apim
 
-Publish API changes without provisioning infrastructure, approving connections,
-changing public access, or touching AKS. Uses the selected azd environment's
-provisioned outputs, including `BRAZIL_*`, `US_*`, and `FRONT_DOOR_*`.
-The original regional keys remain compatible even when actual locations differ.
+Both shells use the same [Node lifecycle engine](./apiops.mjs) and pinned
+[Azure APIOps package](../package.json). Bicep owns infrastructure; Git owns API
+configuration. Sync does not provision infrastructure, approve connections,
+change public access, or change workload replicas. Successful publication includes
+management-plane verification, backend health checks through **AKS Run Command**
+(creates a temporary command pod and executes a read-only request), direct public
+gateway denial tests, and Front Door HTTP verification.
+
+### First-time configuration
+
+Install Node.js 22+ and run `npm ci --ignore-scripts --no-audit --no-fund` from
+the repository root. Authenticate using `az login` in the same host environment.
 
 First run `azd env list` from the repository root, then
 `azd env select <existing-environment>`. If the list is `[]`, there is no local
@@ -213,74 +222,312 @@ example, from the workstation used to deploy) or follow the
 [deployment setup](../README.md#1-prerequisites) for a new deployment.
 Do not create an empty environment just to bypass this check: sync requires
 the actual provisioned APIM, backend, and Front Door outputs. Environment loading
-fails without prompting and does not create an environment or provision Azure
-resources.
+fails without prompting and does not create an environment.
+
+Export the validated allowlist, not the entire azd environment:
 
 ```powershell
-.\scripts\ps1\Sync-Apim.ps1 -DryRun
-.\scripts\ps1\Sync-Apim.ps1
+.\scripts\ps1\Sync-Apim.ps1 -Action Export -OutputPath .\.azure\apim-sync.json
 ```
 
 ```bash
-bash scripts/bash/sync-apim.sh --dry-run
-bash scripts/bash/sync-apim.sh
+bash scripts/bash/sync-apim.sh --action export --output .azure/apim-sync.json
 ```
 
-Dry-run still reads live Azure configuration and requires Azure authentication
-and read permissions, but does not publish. Publishing also requires
-`Microsoft.ApiManagement/service/*` configuration permissions, such as API
-Management Service Contributor on each instance. Azure CLI login is supported by
-APIOps `DefaultAzureCredential`; CI uses the existing federated `azure/login`
-session, without a client secret.
+Export is local-only: it does not contact Azure, write credentials, or publish.
+It requires the provisioned output values already stored in azd. The allowlist
+contains the environment/subscription, global resource group, Front Door profile,
+ID/origin group, `API_URL`, `API_HEALTH_URL`, and regional
+`RESOURCE_GROUP`, `APIM_NAME`, `APIM_ID`, `AKS_NAME`, `BACKEND_IP`,
+`APIM_SUBNET`, and `LOCATION` for `BRAZIL` and `US`. IDs must agree with the
+subscription/group/name, and the two targets must be distinct.
+The historical `BRAZIL`/`US` keys still support other actual Azure locations.
 
-Before any publish, both targets must have public access `Disabled`, exactly one
-correlated approved Private Link connection, and matching Front Door origins.
-The same complete artifact tree is published to each instance in order.
-Temporary YAML-compatible JSON overrides set `regional-demo.serviceUrl`,
-`poc-front-door-id`, and `poc-region` from the environment, then are removed.
-Do not invoke the raw CLI on the placeholder artifacts without these overrides.
-No destructive deletion or incremental mode is enabled, so unrelated APIs remain
-untouched and removed files do not delete live resources.
-Publication pins ARM API `2024-05-01`, matching the original API template rather
-than the CLI's preview default. Caller environment variables are restored.
+The exported file is Azure metadata, not a credential, but is still local and
+ignored by Git. Refresh it after infrastructure outputs change. Each command
+accepts `-ConfigPath` / `--config` to use this file instead of azd; without that
+option it reads the selected azd environment. Do not copy secrets into the file.
+For GitHub setup, the exported JSON can be installed without manual key editing:
 
-If publication of either APIM fails, the command fails explicitly. There is no
-cross-instance transaction or automatic rollback. Fix the issue and rerun the
-command for **both** instances; the full artifact set is reapplied. Run
-[Test-EndToEnd](#test-endtoend) after Front Door propagation. Do not run competing
-sync, provisioning, failover, or manual operators.
+```powershell
+gh variable set APIM_SYNC_ENVIRONMENT_JSON --env azure-preview --body (Get-Content .\.azure\apim-sync.json -Raw)
+gh variable set APIM_SYNC_ENVIRONMENT_JSON --env azure-deployment --body (Get-Content .\.azure\apim-sync.json -Raw)
+```
 
-### Protected manual GitHub workflow
+```bash
+gh variable set APIM_SYNC_ENVIRONMENT_JSON --env azure-preview --body "$(cat .azure/apim-sync.json)"
+gh variable set APIM_SYNC_ENVIRONMENT_JSON --env azure-deployment --body "$(cat .azure/apim-sync.json)"
+```
 
-[sync-apim.yml](../.github/workflows/sync-apim.yml) runs validation first, requires
-the protected `azure-deployment` environment with required reviewers, uses OIDC,
-and shares the deployment workflow's environment-name concurrency group.
-It defaults to dry-run. It does not depend on a runner-local azd environment.
+These `gh` commands change GitHub environment variables, not Azure resources.
+Run them only in the intended repository with permission to administer those
+environments.
 
-Configure existing `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and
-`AZURE_SUBSCRIPTION_ID` environment variables as for deployment. Additionally set
-the **GitHub environment variable** `APIM_SYNC_ENVIRONMENT_JSON` to the JSON output
-of `azd env get-values --output json` from the provisioned environment. Retain only:
+### Daily API change: preview, review, publish
 
-- `AZURE_ENV_NAME`, `AZURE_SUBSCRIPTION_ID`
-- `AZURE_RESOURCE_GROUP`, `FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_ID`,
-  `FRONT_DOOR_ORIGIN_GROUP_NAME`
-- For each of `BRAZIL` and `US`, the suffixes `RESOURCE_GROUP`, `APIM_NAME`,
-  `APIM_ID`, `AKS_NAME`, `BACKEND_IP`, `APIM_SUBNET`, and `LOCATION`
+1. Edit [shared artifacts](../apim-artifacts/); review and test the change.
+2. Select the intended provisioned environment (or use an exported config).
+3. Generate a read-only preview and review every resource difference.
+4. Publish using that same receipt, then inspect the verification report.
 
-Do not include credentials or unrelated environment values. This configuration
-is Azure metadata, must not be committed, and must be refreshed if infrastructure
-outputs change. The workflow rejects a different environment name/subscription.
-Dispatch **Sync both private APIMs** with the matching environment name and
-`dry_run: true`; review the plan, then dispatch with `dry_run: false`.
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -ConfigPath .\.azure\apim-sync.json `
+  -DryRun -PlanPath .\TestResults\apiops-plan.json
+.\scripts\ps1\Sync-Apim.ps1 -ConfigPath .\.azure\apim-sync.json `
+  -PlanPath .\TestResults\apiops-plan.json -ReportPath .\TestResults\publish-report.json
+```
 
-The initial deployment workflow also installs the locked APIOps CLI before its
-postprovision hook. Bicep no longer manages API resources; do not restore a
-parallel API template as a second source of truth.
+```bash
+bash scripts/bash/sync-apim.sh --config .azure/apim-sync.json \
+  --dry-run --plan TestResults/apiops-plan.json
+bash scripts/bash/sync-apim.sh --config .azure/apim-sync.json \
+  --plan TestResults/apiops-plan.json --report TestResults/publish-report.json
+```
+
+Dry-run is a managed-field comparison, not ARM schema acceptance or a network
+test. It never writes Azure resources or invokes AKS Run Command. Its receipt
+binds the commit SHA, normalized artifact hash, allowlisted configuration hash,
+deletion manifest hash, lifecycle/lockfile hash, and each target's observed
+configuration baseline. Receipts expire after **24 hours**. If any binding or
+observed managed value changes, publication fails before the first write.
+With no `-Revision`, local commands snapshot the current working tree artifacts;
+the artifact hash binds uncommitted edits too. Prefer committed changes.
+An ordinary local publish without a receipt remains available for bootstrap and
+explicit operator use; **CI always requires the preview receipt**.
+
+#### Example: expose the existing liveness route
+
+The backend already implements `/health/live`. Add a new
+`apim-artifacts/apis/regional-demo/operations/live/operationInformation.json`:
+
+```json
+{
+  "properties": {
+    "displayName": "Backend liveness",
+    "method": "GET",
+    "urlTemplate": "/health/live",
+    "responses": [{"statusCode": 200}]
+  }
+}
+```
+
+Run local validation, commit/review the change, then use the preview/publish
+commands above. Both APIMs receive the operation and inherit the API policy.
+Call `https://<front-door-host>/demo/health/live` after publication. This example
+does not require changing the Python backend.
+
+### Permissions and verification boundaries
+
+- **Preview/drift:** read APIM configuration/private endpoint connections and
+  Front Door origins. A read-only identity is sufficient; it does not need
+  AKS Run Command or APIM write permissions.
+- **Publish:** APIM configuration read/write, e.g. API Management Service
+  Contributor on each APIM, plus Front Door origin reads.
+- **Runtime verification:** AKS `runcommand/action` and `commandResults/read`,
+  and permission for `kubectl exec` in `private-poc` on both clusters. Use
+  appropriately scoped AKS Azure RBAC permissions rather than disabling RBAC.
+- Azure CLI login or managed identity is used via `DefaultAzureCredential`.
+  GitHub uses federated `azure/login`, without a client secret.
+
+Every live action first checks **both** APIMs: public access `Disabled`, one
+correlated approved private connection, and the expected Front Door origin.
+Regional overrides supply each backend URL, `poc-region`, and `poc-front-door-id`.
+ARM API `2024-05-01` is pinned; incremental mode and delete-unmatched are disabled.
+Environment variables such as `COMMIT_ID` cannot limit reconciliation.
+
+After each publication, the engine compares all managed properties, operations,
+and policy XML against the live APIM. Server-added defaults are ignored; changed
+managed fields are not. After both configurations verify, it checks each backend
+via its internal Service from its own AKS cluster, verifies direct public APIM
+requests are blocked, and checks Front Door root/readiness responses, region
+headers, correlation GUIDs, and `Cache-Control: no-store`. Front Door checks
+retry up to 30 times, 30 seconds apart, for propagation.
+
+**This does not independently prove both private gateway data paths.**
+Front Door can favor one region; the report records only the region(s) actually
+observed. Independent gateway data-path coverage needs private test connectivity.
+No origin is disabled to force routing. The lifecycle currently verifies explicit
+APIs, operations, API/operation policies, nonsecret named values, and backends.
+Specification imports, revisions/workspaces, secret/Key Vault artifacts, and other
+resource types fail closed until verification is extended.
+The engine uses the pinned CLI package's publisher/client interfaces; dependency
+upgrades must pass the integration tests before merging.
+
+### Evidence and partial failures
+
+Reports default to timestamped JSON under ignored `TestResults/`. Use
+`-ReportPath` / `--report` for a fixed path. Preview defaults to
+`TestResults/apiops-plan.json`. Reports include commit/hash bindings, timestamps,
+target/region, publication result/action metadata, configuration comparison
+fingerprints, per-target publication/verification duration, runtime observations,
+and a failed stage when applicable. They omit raw resource bodies, named value
+contents, access tokens, and SDK error bodies. Treat the metadata as operational
+information, not a public artifact.
+
+Exit codes: `0` success, `1` lifecycle/configuration/verification failure, and
+`3` drift detected. PowerShell throws for any nonzero code; native Bash preserves
+the engine code on its entry point. No failure is represented as success.
+
+There is **no cross-instance transaction or automatic rollback**. If the second
+target fails, the first may already be updated. Keep public access disabled.
+Inspect the report, correct the issue, generate a fresh preview (the old baseline
+may now be stale), and publish to **both** instances. A runtime-verification
+failure also means publication is not considered verified, even if both ARM
+writes succeeded. No concurrent local/provisioning/failover operators are safe.
+
+### Read-only drift detection
+
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -Action Drift -ConfigPath .\.azure\apim-sync.json `
+  -ReportPath .\TestResults\drift.json
+```
+
+```bash
+bash scripts/bash/sync-apim.sh --action drift --config .azure/apim-sync.json \
+  --report TestResults/drift.json
+```
+
+Compare each target to the same Git artifacts plus its intentional regional
+overrides, not to the other region's raw backend URL. Missing/changed managed
+resources and additional operations under managed APIs are reported; unrelated
+APIs/named values are outside this ownership scope. Drift does not auto-remediate.
+Extra operations are reported as `unmanaged` and retained during ordinary sync.
+The engine does not read or print secrets to perform drift comparison.
+
+### Rollback to known-good artifacts
+
+Use the **full 40-character commit SHA** of a previously verified APIOps revision:
+
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -ConfigPath .\.azure\apim-sync.json -Revision "<known-good-sha>" `
+  -DryRun -PlanPath .\TestResults\rollback-plan.json
+.\scripts\ps1\Sync-Apim.ps1 -ConfigPath .\.azure\apim-sync.json -Revision "<known-good-sha>" `
+  -PlanPath .\TestResults\rollback-plan.json -ReportPath .\TestResults\rollback-report.json
+```
+
+```bash
+bash scripts/bash/sync-apim.sh --config .azure/apim-sync.json --revision "<known-good-sha>" \
+  --dry-run --plan TestResults/rollback-plan.json
+bash scripts/bash/sync-apim.sh --config .azure/apim-sync.json --revision "<known-good-sha>" \
+  --plan TestResults/rollback-plan.json --report TestResults/rollback-report.json
+```
+
+Only API artifacts are read from that commit into a cleaned-up temporary
+snapshot; the current tested engine, dependencies, and **current** regional
+configuration remain in use. No checkout/reset, infrastructure rollback, or
+backend image rollback is performed. The commit must be available locally
+(`git fetch origin` if needed). Revisions before APIOps artifacts existed cannot
+be used. Newer operations are not automatically deleted by rollback; review an
+explicit deletion separately if required. The same verification and partial
+failure rules apply.
+
+### Explicit, reviewed operation deletion
+
+Deleting a file alone does not delete Azure resources. Ordinary sync never uses
+`--delete-unmatched`. This lifecycle only automates **API operation deletion**;
+whole APIs, named values, backends, and required `region`/`ready` operations are
+not accepted by the allowlist. Other resource retirement needs a separately
+reviewed migration/dependency procedure.
+
+For example, after retiring the optional `live` operation above:
+
+1. Remove its artifact (and any child policies) in a reviewed change.
+2. Add a manifest, e.g. `apim-deletions/retire-live.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "baseRevision": "<full-commit-sha-that-contained-the-operation>",
+  "operations": [
+    {
+      "path": "apis/regional-demo/operations/live",
+      "reason": "Retire the optional public liveness operation"
+    }
+  ]
+}
+```
+
+3. Preview with `-DeletionManifest` / `--deletions`. Review the exact `delete`
+   entries for both targets and the receipt hash.
+4. Publish with the same manifest/receipt **and** `-AllowDelete` / `--allow-delete`:
+
+```powershell
+.\scripts\ps1\Sync-Apim.ps1 -DryRun -DeletionManifest .\apim-deletions\retire-live.json `
+  -PlanPath .\TestResults\delete-plan.json
+.\scripts\ps1\Sync-Apim.ps1 -DeletionManifest .\apim-deletions\retire-live.json `
+  -PlanPath .\TestResults\delete-plan.json -AllowDelete
+```
+
+```bash
+bash scripts/bash/sync-apim.sh --dry-run --deletions apim-deletions/retire-live.json \
+  --plan TestResults/delete-plan.json
+bash scripts/bash/sync-apim.sh --deletions apim-deletions/retire-live.json \
+  --plan TestResults/delete-plan.json --allow-delete
+```
+
+The parent API must remain managed; the operation must be absent from the source
+snapshot and proven present in Git at `baseRevision`. Wildcards, duplicate paths,
+critical operations, and missing ownership proof fail before any publish.
+Each exact operation is deleted only after its target's publish succeeds, and
+absence is verified. Already-absent operations are idempotent. Retain manifests
+for audit; they are not automatically replayed on later syncs.
+
+### Protected preview, approval, and publication in GitHub
+
+[sync-apim.yml](../.github/workflows/sync-apim.yml) uses one run:
+
+1. Validate the current code, tests, and workflow.
+2. Read-only **preview** using environment `azure-preview`.
+3. Upload `apiops-preview-<run-id>` and summarize resource paths/statuses/hashes.
+4. If `dry_run` is false, wait for required reviewers on `azure-deployment`.
+5. Download **this run's** receipt, use the same checked-out workflow commit and
+   artifact SHA, recheck all bindings/live baselines, publish, and verify.
+6. Upload sanitized publication evidence even on failure. Preview retention is
+   14 days; publication retention is 30 days.
+
+Configure both GitHub environments with `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID`, and `APIM_SYNC_ENVIRONMENT_JSON` set to the **allowlisted
+export** from first-time setup. Use a separate read-only identity for
+`azure-preview`; give `azure-deployment` only the publish/runtime roles above.
+Create Entra OIDC federations for both environment subjects. Keep required
+reviewers, prevent self-approval, and restrict deployment branches on
+`azure-deployment`. Preview credentials/configuration must be available before
+the write approval; do not reuse write credentials for the preview identity.
+The workflow rejects mismatched environment/subscription metadata.
+
+Dispatch with `dry_run: true` for preview only. To publish, dispatch once with
+`dry_run: false`: review **that run's preview** before approving its publish job.
+Do not treat a previous run's preview as approval for a different commit.
+The optional `revision` input selects a full known-good artifact SHA for rollback.
+The optional `deletion_manifest` must name a tracked
+`apim-deletions/<name>.json` in the workflow checkout; approving the publish job
+also authorizes that exact hashed operation list.
+
+The workflow serializes with provisioning via the existing environment-name
+concurrency group. GitHub may replace older pending runs; this is not a FIFO
+queue. Local operators still require coordination. No workflow automatically
+deploys on a portal edit, deletes unmatched resources, or forces regional routing.
+
+### APIOps troubleshooting
+
+| Symptom | Action |
+|---|---|
+| Empty/invalid azd environment name or `azd env list` is `[]` | Restore/select the provisioned environment or use an allowlisted export with `-ConfigPath` / `--config`; do not create an empty environment as a workaround. |
+| Missing output key or APIM ID mismatch | Re-export after successful infrastructure provisioning. Verify the selected subscription and regional resource IDs. |
+| Missing Node module | Install Node.js 22+ and run `npm ci --ignore-scripts` at the repository root in the same host environment. |
+| HTTP 401/403 during preview | Check `az login`/OIDC and read access to both APIMs and Front Door; no write role is needed for preview. |
+| HTTP 403 publishing or AKS verification | Check APIM write, AKS Run Command, command-result read, and namespace exec permissions. Do not enable public access or disable RBAC. |
+| Plan mismatch, expired receipt, or live drift since preview | Generate a fresh preview and obtain a new review. Do not edit the receipt to bypass the gate. |
+| Second APIM fails | Inspect per-target evidence, repair the cause, preview again, then reconcile both. |
+| Both configurations verify but runtime fails | Check regional backend health, FDID override, probes, and Front Door propagation. Publication is not yet verified. |
+| Drift exits 3 | Review matching/missing/changed/unmanaged entries. Intentionally retain extras or use the reviewed operation deletion procedure; no auto-remediation occurs. |
+| Rollback SHA fails | Fetch the commit, supply all 40 lowercase hex characters, and choose a revision containing APIOps artifacts. |
 
 References: [publish flags](https://github.com/Azure/apiops-cli/blob/main/docs/commands/publish.md),
 [artifact format](https://github.com/Azure/apiops-cli/blob/main/docs/reference/artifact-format.md),
 and [environment overrides](https://github.com/Azure/apiops-cli/blob/main/docs/guides/environment-overrides.md).
+Runtime verification uses the documented
+[AKS Run Command REST API](https://learn.microsoft.com/rest/api/aks/managed-clusters/run-command?view=rest-aks-2025-01-01).
 
 ## Test-EndToEnd
 

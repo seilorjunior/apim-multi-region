@@ -64,7 +64,7 @@ private_bootstrap() {
         aks_checked "$region" "$command" "$BOOTSTRAP_TEMP_DIR/demo.yaml"
     done
     sync_apim
-    log "Demo published at $(required API_URL). Allow Front Door propagation, then run scripts/bash/test-end-to-end.sh."
+    log "Demo published and non-disruptive runtime verification passed at $(required API_URL). For the full routing test, run scripts/bash/test-end-to-end.sh."
 }
 
 cleanup_bootstrap() {

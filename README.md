@@ -315,17 +315,17 @@ infrastructure or restarting workloads:
 
 ```powershell
 .\scripts\ps1\Sync-Apim.ps1 -DryRun
-.\scripts\ps1\Sync-Apim.ps1
+.\scripts\ps1\Sync-Apim.ps1 -PlanPath .\TestResults\apiops-plan.json
 ```
 
 ```bash
 bash scripts/bash/sync-apim.sh --dry-run
-bash scripts/bash/sync-apim.sh
+bash scripts/bash/sync-apim.sh --plan TestResults/apiops-plan.json
 ```
 
 Both paths verify **both** gateways are private, their approved Private Link
 requests are correlated, and Front Door origins match before publishing anything.
-They publish the same full artifact set sequentially; generated temporary
+They publish the same full artifact set sequentially; generated in-memory
 overrides supply each backend IP, actual region, and Front Door ID. The
 `poc-front-door-id` and `poc-region` named values are owned by this repository.
 Existing `/demo/` routes, correlation, no-cache behavior, and FDID validation are
@@ -335,9 +335,20 @@ APIOps `DefaultAzureCredential`; no keys or client secrets are checked in.
 This is Git-to-both reconciliation, not continuous portal-to-portal replication.
 Untracked APIs are preserved: no `--delete-unmatched` or incremental commit mode
 is used. Removing a file does not delete the live resource; deletions require a
-separately reviewed procedure. A partial failure exits nonzero and is not atomic
-across regions. Correct it and rerun the same command for both; do not reopen
-public access. See the [script reference](./scripts/README.md#sync-apim) for CI setup.
+separately reviewed operation deletion manifest. Preview receipts bind the source
+commit, artifact/configuration/toolchain hashes and live baselines for 24 hours.
+A partial failure exits nonzero and is not atomic across regions. Correct it,
+preview again, then reconcile both; do not reopen public access.
+
+The lifecycle also provides allowlisted environment export (`-Action Export` /
+`--action export`), read-only drift detection (`-Action Drift` / `--action drift`),
+and known-good artifact rollback (`-Revision` / `--revision` with a full commit
+SHA). Publication saves sanitized per-region evidence and verifies managed
+configuration, each backend, blocked public gateways, and Front Door responses.
+AKS Run Command performs the backend checks without restarting deployments.
+The Front Door observations do **not** prove independent coverage of both private
+gateway data paths. See the [script reference](./scripts/README.md#sync-apim) for
+walkthroughs, permissions, rollback/deletion safety, and troubleshooting.
 
 ## 5. Verify the deployed environment
 
@@ -486,8 +497,10 @@ It has **no automatic restoration** and does not preserve a custom original coun
   Local/manual operations outside this workflow still require coordination.
   **Not a production pipeline.**
 - [Sync both private APIMs](./.github/workflows/sync-apim.yml): manual,
-  validation-gated and protected by `azure-deployment`; defaults to dry-run.
-  Publishes Git artifacts to both existing APIMs without reprovisioning.
+  validation-gated preview on read-only `azure-preview`, then approval on
+  `azure-deployment` for the same commit/configuration-bound receipt.
+  Defaults to preview only; optional full artifact SHA supports rollback.
+  Publishes and verifies both existing APIMs without reprovisioning.
   Shares the deployment concurrency group. Configure the environment output
   metadata described in the [sync reference](./scripts/README.md#sync-apim).
 
