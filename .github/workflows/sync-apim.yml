@@ -111,7 +111,7 @@ jobs:
         run: |
           $protected = gh api "repos/$env:GH_REPO/environments/azure-deployment" --jq 'any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length) > 0)'
           if ($LASTEXITCODE -ne 0 -or $protected -ne 'true') { throw 'Configure required reviewers on azure-deployment first.' }
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: apiops-preview-${{ github.run_id }}
           path: TestResults
